@@ -47,7 +47,7 @@ export async function seedDefaultAdmin() {
       username: 'admin',
       passwordHash: hash,
       role: 'admin',
-      mustChangePassword: true,
+      mustChangePassword: false,
       createdAt: new Date().toISOString(),
     });
     writeUsers(data);
@@ -86,7 +86,7 @@ export async function createUser({ username, password, role }) {
     username,
     passwordHash: hash,
     role: role === 'admin' ? 'admin' : 'user',
-    mustChangePassword: true,
+    mustChangePassword: false,
     createdAt: new Date().toISOString(),
   };
   data.users.push(user);
