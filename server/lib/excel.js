@@ -15,11 +15,56 @@ function toTitleCase(s) {
     .join(' ');
 }
 
+/**
+ * Normalize display form of a provider name:
+ * - standardize "Jr" / "Sr" punctuation
+ * - drop trailing degree suffixes ("MD", "DO")
+ * - canonicalize Roman numerals II / III
+ * - tidy double commas and extra spaces
+ */
+function cleanNameForDisplay(name) {
+  return name
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\bJr\.?\b/gi, 'Jr')
+    .replace(/\bSr\.?\b/gi, 'Sr')
+    .replace(/\bMd\.?\b/gi, '')
+    .replace(/\bDo\.?\b/gi, '')
+    .replace(/\bIii\b/gi, 'III')
+    .replace(/\bIi\b/gi, 'II')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Produce a matching key that collapses punctuation, comma position, and
+ * middle-name abbreviations (e.g. "Mark Elliott" vs "Mark E.") so the same
+ * provider written in different ways across months/years can be merged.
+ */
+export function matchKey(name) {
+  const flat = name
+    .toLowerCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const tokens = flat.split(' ').filter(Boolean);
+  if (tokens.length <= 2) return tokens.join(' ');
+  // Keep the first two tokens (usually surname + suffix or surname + first name).
+  // Reduce every additional token to its first letter to merge middle-name
+  // abbreviations.
+  return [tokens[0], tokens[1], ...tokens.slice(2).map((t) => t[0])].join(' ');
+}
+
 function isExcludedName(name) {
   if (!name || typeof name !== 'string') return true;
   const trimmed = name.trim();
   if (!trimmed) return true;
-  if (/no referring phys/i.test(trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('no referring')) return true;
+  if (lower.includes('grand total')) return true;
+  if (lower === 'total' || lower.startsWith('total ')) return true;
   return false;
 }
 
@@ -75,10 +120,13 @@ export function parseWorkbook(buffer) {
         if (isExcludedName(rawName)) continue;
         const eyes = Number(rawEyes);
         if (!Number.isFinite(eyes) || eyes <= 0) continue;
+        const titleCased = toTitleCase(String(rawName));
+        const display = cleanNameForDisplay(titleCased);
+        if (!display) continue;
         entries.push({
           year: mc.year,
           month: mc.month,
-          provider: toTitleCase(String(rawName)),
+          provider: display,
           eyes,
         });
       }
@@ -89,15 +137,36 @@ export function parseWorkbook(buffer) {
 }
 
 /**
- * Combine duplicate (provider, year, month) rows by summing eyes.
+ * Merge duplicate provider name variants by matchKey, sum eyes per
+ * (provider, year, month), and pick the longest display name as canonical.
  */
 export function coalesceEntries(entries) {
-  const map = new Map();
+  // Group entries by matchKey
+  const groups = new Map();
   for (const e of entries) {
-    const key = `${e.provider}|${e.year}|${e.month}`;
-    const existing = map.get(key);
-    if (existing) existing.eyes += e.eyes;
-    else map.set(key, { ...e });
+    const key = matchKey(e.provider);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
   }
-  return Array.from(map.values());
+
+  const out = [];
+  for (const [, list] of groups) {
+    // Pick the longest display name (tie-break alphabetically) as canonical
+    const display = list
+      .map((e) => e.provider)
+      .sort((a, b) => b.length - a.length || a.localeCompare(b))[0];
+
+    // Sum eyes per (year, month)
+    const monthMap = new Map();
+    for (const e of list) {
+      const k = `${e.year}|${e.month}`;
+      monthMap.set(k, (monthMap.get(k) || 0) + e.eyes);
+    }
+    for (const [k, eyes] of monthMap) {
+      const [y, m] = k.split('|').map(Number);
+      out.push({ year: y, month: m, provider: display, eyes });
+    }
+  }
+  return out;
 }

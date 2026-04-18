@@ -13,6 +13,16 @@ function pct(n) {
   return `${s}${n.toFixed(1)}%`;
 }
 
+function avg(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  return Number(n).toFixed(1);
+}
+
+function whole(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  return Math.round(Number(n)).toString();
+}
+
 export default function ReportPreview() {
   const navigate = useNavigate();
   const [payload, setPayload] = useState(null);
@@ -197,7 +207,7 @@ function Quadrant({ label, color, items }) {
               {p.provider} <span className="text-slate-500">{p.arrow}</span>
             </div>
             <div className="text-xs text-slate-600">
-              3mo avg {p.last3Avg} · prior-yr avg {p.priorAvg} · {pct(p.pctChange)} · {p.direction}
+              3mo avg {avg(p.last3Avg)} · prior-yr avg {avg(p.priorAvg)} · {pct(p.pctChange)} · {p.direction}
             </div>
           </div>
         ))}
@@ -227,7 +237,7 @@ function ActionList({ title, color, items }) {
               {p.provider} <span className="text-slate-500">{p.arrow}</span>
             </div>
             <div className="text-xs text-slate-500 mb-1">
-              3mo avg {p.last3Avg} · total {p.totalEyes} eyes · {pct(p.pctChange)}
+              3mo avg {avg(p.last3Avg)} · total {whole(p.totalEyes)} eyes · {pct(p.pctChange)}
             </div>
             <div className="text-sm text-slate-700 italic">{p.reason}</div>
           </div>

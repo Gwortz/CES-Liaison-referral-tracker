@@ -18,12 +18,22 @@ const COLORS = {
 };
 
 function fmt(n) {
-  if (n == null || Number.isNaN(n)) return '—';
-  return typeof n === 'number' ? n.toLocaleString() : String(n);
+  if (n == null || Number.isNaN(n)) return '--';
+  return typeof n === 'number' ? Math.round(n).toLocaleString() : String(n);
+}
+
+function avg(n) {
+  if (n == null || Number.isNaN(n)) return '--';
+  return typeof n === 'number' ? n.toFixed(1) : String(n);
+}
+
+function whole(n) {
+  if (n == null || Number.isNaN(n)) return '--';
+  return typeof n === 'number' ? Math.round(n).toString() : String(n);
 }
 
 function pct(n) {
-  if (n == null) return '—';
+  if (n == null) return '--';
   const sign = n > 0 ? '+' : '';
   return `${sign}${n.toFixed(1)}%`;
 }
@@ -73,7 +83,7 @@ function renderHeader(doc, market, analysis) {
     .fillColor(COLORS.text)
     .font('Helvetica')
     .fontSize(12)
-    .text(`${market} — ${monthLabel} ${year}`, { align: 'left' });
+    .text(`${market} -- ${monthLabel} ${year}`, { align: 'left' });
 
   doc.moveDown(0.5);
   drawHR(doc);
@@ -137,7 +147,9 @@ function renderSWOT(doc, analysis) {
       .fillColor('#fff')
       .font('Helvetica-Bold')
       .fontSize(10)
-      .text(q.label, x + 6, y + 2, { width: colWidth - 12 });
+      .text(`${q.label} (${q.items.length})`, x + 6, y + 2, {
+        width: colWidth - 12,
+      });
     doc.restore();
 
     let cursor = y + 18;
@@ -161,9 +173,9 @@ function renderSWOT(doc, analysis) {
           .text(`${p.provider} ${p.arrow}`, x + 6, cursor, { width: colWidth - 12 });
         cursor = doc.y;
 
-        const line = `3mo avg ${p.last3Avg} · prior-yr avg ${p.priorAvg} · ${pct(
-          p.pctChange
-        )} · ${p.direction}`;
+        const line = `3mo avg ${avg(p.last3Avg)} | prior-yr avg ${avg(
+          p.priorAvg
+        )} | ${pct(p.pctChange)} | ${p.direction}`;
         doc
           .font('Helvetica')
           .fontSize(8.5)
@@ -186,10 +198,10 @@ function renderActionReport(doc, analysis) {
   sectionTitle(doc, 'Monthly Action Report');
 
   const lists = [
-    { title: 'Thank List (Strengths — keep the relationship)', color: COLORS.strength, items: analysis.action.thankList },
-    { title: 'Watch List (Weaknesses — monitor next month)', color: COLORS.weakness, items: analysis.action.watchList },
-    { title: 'Call List (Threats — personal visit or call)', color: COLORS.threat, items: analysis.action.callList },
-    { title: 'Welcome List (Opportunities — reach out and encourage)', color: COLORS.opportunity, items: analysis.action.welcomeList },
+    { title: 'Thank List (Strengths -- keep the relationship)', color: COLORS.strength, items: analysis.action.thankList },
+    { title: 'Watch List (Weaknesses -- monitor next month)', color: COLORS.weakness, items: analysis.action.watchList },
+    { title: 'Call List (Threats -- personal visit or call)', color: COLORS.threat, items: analysis.action.callList },
+    { title: 'Welcome List (Opportunities -- reach out and encourage)', color: COLORS.opportunity, items: analysis.action.welcomeList },
   ];
 
   lists.forEach((list) => {
@@ -222,7 +234,9 @@ function renderActionReport(doc, analysis) {
           .fontSize(9)
           .fillColor(COLORS.muted)
           .text(
-            `3mo avg ${p.last3Avg} · total ${p.totalEyes} eyes · ${pct(p.pctChange)}`
+            `3mo avg ${avg(p.last3Avg)} | total ${whole(
+              p.totalEyes
+            )} eyes | ${pct(p.pctChange)}`
           );
         doc
           .font('Helvetica-Oblique')
@@ -246,7 +260,7 @@ function renderFooter(doc) {
       .fillColor(COLORS.muted)
       .fontSize(8)
       .text(
-        `Generated ${new Date().toLocaleDateString()} · Commonwealth Eye Surgery — Confidential`,
+        `Generated ${new Date().toLocaleDateString()} | Commonwealth Eye Surgery -- Confidential`,
         doc.page.margins.left,
         doc.page.height - 30,
         { align: 'center', width: doc.page.width - doc.page.margins.left - doc.page.margins.right }

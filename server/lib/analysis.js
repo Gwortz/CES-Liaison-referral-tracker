@@ -6,7 +6,27 @@
  */
 
 const MIN_EYES = 6;
-const MIN_MONTHS = 3;
+const WINDOW_MONTHS = 3;
+
+/**
+ * Returns true if the series has any rolling WINDOW_MONTHS calendar-month
+ * window (missing months counted as 0 eyes) whose sum meets MIN_EYES.
+ */
+function qualifiesByWindow(arr, maxKey = Infinity) {
+  const eligible = arr.filter((x) => x.key <= maxKey);
+  if (!eligible.length) return false;
+  const byKey = new Map(eligible.map((x) => [x.key, x.eyes]));
+  const firstKey = eligible[0].key;
+  const lastKey = eligible[eligible.length - 1].key;
+  for (let end = firstKey + WINDOW_MONTHS - 1; end <= lastKey; end++) {
+    let sum = 0;
+    for (let k = end - WINDOW_MONTHS + 1; k <= end; k++) {
+      sum += byKey.get(k) || 0;
+    }
+    if (sum >= MIN_EYES) return true;
+  }
+  return false;
+}
 
 function mean(arr) {
   if (!arr.length) return 0;
@@ -28,9 +48,6 @@ function fromMonthKey(k) {
   return { year: Math.floor(k / 12), month: (k % 12) + 1 };
 }
 
-/**
- * Linear regression slope of y vs x = [0..n-1]. Returns slope in eyes/month.
- */
 function slope(values) {
   const n = values.length;
   if (n < 2) return 0;
@@ -52,15 +69,15 @@ function trendDirection(slp) {
   return 'flat';
 }
 
-function arrowFor(direction) {
-  if (direction === 'increasing') return '↑';
-  if (direction === 'declining') return '↓';
-  return '→';
+/**
+ * Trend arrow helper — always returns a safe ASCII character so nothing
+ * ever renders as "undefined" or a box glyph in the PDF.
+ */
+export function trendArrow(trend) {
+  const map = { increasing: '^', declining: 'v', flat: '-' };
+  return map[trend] || '-';
 }
 
-/**
- * Builds a per-provider time-series (sparse, by monthKey) and computes metrics.
- */
 function buildProviderSeries(entries) {
   const map = new Map();
   for (const e of entries) {
@@ -73,9 +90,6 @@ function buildProviderSeries(entries) {
   return map;
 }
 
-/**
- * Compute report-month context from entries (latest (year, month) present).
- */
 function determineReportMonth(entries) {
   if (!entries.length) return null;
   let maxKey = -Infinity;
@@ -113,59 +127,38 @@ export function analyze(entries) {
   const reportMonth = determineReportMonth(entries);
   const { year: ry, month: rm } = reportMonth;
 
-  // Last 3 months (based on reportMonth)
-  const lastThreeKeys = [monthKey(ry, rm) - 2, monthKey(ry, rm) - 1, monthKey(ry, rm)];
-  const lastThreeMonths = lastThreeKeys.map(fromMonthKey);
-
-  // Same 3 months prior year
-  const priorYearThreeKeys = lastThreeKeys.map((k) => k - 12);
-
   const series = buildProviderSeries(entries);
 
-  // Identify providers meeting minimum threshold: >= 6 eyes across >= 3 months
-  const qualifying = new Map(); // provider -> stats
+  // Identify qualifying providers (>=6 eyes in any consecutive 3-month window)
+  const qualifying = new Map();
   for (const [provider, arr] of series) {
+    if (!qualifiesByWindow(arr)) continue;
     const totalEyes = arr.reduce((s, x) => s + x.eyes, 0);
     const monthsPresent = arr.length;
-    if (totalEyes < MIN_EYES || monthsPresent < MIN_MONTHS) continue;
 
     const values = arr.map((x) => x.eyes);
     const personalMean = mean(values);
     const personalStd = stddev(values);
 
-    // Recent 3 months they appear in — most recent entries (not necessarily reportMonth aligned)
     const last3Entries = arr.slice(-3);
     const last3Avg = mean(last3Entries.map((x) => x.eyes));
 
-    // Same-period prior year: look up entries matching last3Entries' months shifted by -12
     const priorMatched = last3Entries.map((x) => {
       const found = arr.find((y) => y.key === x.key - 12);
       return found ? found.eyes : 0;
     });
     const priorAvg = mean(priorMatched);
 
-    // Trend slope over last 3 months
     const slp = slope(last3Entries.map((x) => x.eyes));
     const direction = trendDirection(slp);
 
-    // Personal Z-score
     const z = personalStd > 0 ? (last3Avg - personalMean) / personalStd : 0;
 
-    // Percent change vs prior year same period
     const pctChange =
       priorAvg > 0 ? ((last3Avg - priorAvg) / priorAvg) * 100 : null;
 
-    // Check if this is a new-to-threshold provider:
-    // they hit threshold only considering months up through reportMonth,
-    // but would not have met it one month earlier.
-    const throughNow = arr.filter((x) => x.key <= monthKey(ry, rm));
-    const throughPrev = arr.filter((x) => x.key <= monthKey(ry, rm) - 1);
-    const nowMet =
-      throughNow.reduce((s, x) => s + x.eyes, 0) >= MIN_EYES &&
-      throughNow.length >= MIN_MONTHS;
-    const prevMet =
-      throughPrev.reduce((s, x) => s + x.eyes, 0) >= MIN_EYES &&
-      throughPrev.length >= MIN_MONTHS;
+    const nowMet = qualifiesByWindow(arr, monthKey(ry, rm));
+    const prevMet = qualifiesByWindow(arr, monthKey(ry, rm) - 1);
     const newlyThreshold = nowMet && !prevMet;
 
     qualifying.set(provider, {
@@ -184,13 +177,13 @@ export function analyze(entries) {
     });
   }
 
-  // Top 10 by total referral volume
+  // Rank all qualifying providers by total historical referral volume BEFORE
+  // the SWOT classification loop runs.
   const sortedByVolume = Array.from(qualifying.values()).sort(
     (a, b) => b.totalEyes - a.totalEyes
   );
-  const top10 = new Set(sortedByVolume.slice(0, 10).map((x) => x.provider));
+  const top15 = new Set(sortedByVolume.slice(0, 15).map((x) => x.provider));
 
-  // Categorize into SWOT
   const strengths = [];
   const weaknesses = [];
   const opportunities = [];
@@ -208,23 +201,35 @@ export function analyze(entries) {
       threats.push(p);
       continue;
     }
-    if (declining) {
+
+    // Weakness: declining AND has prior year data AND YoY is negative-or-flat (<+5%)
+    if (
+      declining &&
+      p.priorAvg > 0 &&
+      (p.pctChange === null || p.pctChange < 5)
+    ) {
       weaknesses.push(p);
       continue;
     }
+
+    // Opportunity: newly hit threshold, or trending strongly up vs personal norm
     if (p.newlyThreshold || p.zScore > 1.0) {
       opportunities.push(p);
-      // Can ALSO be strength; but not both to keep report clean → skip strength if opp
       continue;
     }
-    if (top10.has(p.provider) && (p.direction === 'flat' || p.direction === 'increasing')) {
+
+    // Strength: top-15 volume AND not declining AND YoY isn't deep negative
+    if (
+      top15.has(p.provider) &&
+      p.direction !== 'declining' &&
+      (p.pctChange === null || p.pctChange > -15)
+    ) {
       strengths.push(p);
     }
   }
 
-  // Sort each bucket for display
   strengths.sort((a, b) => b.totalEyes - a.totalEyes);
-  weaknesses.sort((a, b) => a.pctChange ?? 0 - (b.pctChange ?? 0));
+  weaknesses.sort((a, b) => (a.pctChange ?? 0) - (b.pctChange ?? 0));
   opportunities.sort((a, b) => b.zScore - a.zScore);
   threats.sort((a, b) => (a.pctChange ?? -9999) - (b.pctChange ?? -9999));
 
@@ -260,52 +265,67 @@ export function analyze(entries) {
     overallTrend = `Overall referrals are ${parts.join(' and ')}.`;
   }
 
-  // Monthly Action Report — build reason strings
+  // Reason strings — plain ASCII only (no sigma, no bullet arrows)
   const reasonFor = (p, type) => {
-    const pct =
+    const pctAbs =
       p.pctChange == null ? null : Math.abs(p.pctChange).toFixed(0) + '%';
     switch (type) {
       case 'strength':
-        return `Top-10 volume (${p.totalEyes} eyes total) with ${p.direction} trend — keep engaged.`;
-      case 'weakness':
-        return `Trend declining 3 months in a row${
-          pct && p.pctChange < 0 ? ` and down ${pct} vs same period last year` : ''
-        } — watch next month.`;
+        return `Top-15 referral volume (${Math.round(
+          p.totalEyes
+        )} eyes total) with ${p.direction} trend -- keep engaged.`;
+      case 'weakness': {
+        const parts = ['3-month trend is declining'];
+        if (pctAbs && p.pctChange < 0) {
+          parts.push(`down ${pctAbs} vs same period last year`);
+        }
+        return parts.join(' and ') + ' -- watch next month.';
+      }
       case 'threat': {
         const bits = [];
-        if (p.priorAvg > 0 && p.last3Avg < p.priorAvg && pct)
-          bits.push(`down ${pct} vs same period last year`);
+        if (p.priorAvg > 0 && p.last3Avg < p.priorAvg && pctAbs)
+          bits.push(`down ${pctAbs} vs same period last year`);
         if (p.zScore < -1.5)
-          bits.push(`${Math.abs(p.zScore).toFixed(1)}σ below their personal average`);
-        if (p.direction === 'declining') bits.push('declining 3 months in a row');
-        return bits.length ? bits.join(' and ') + '.' : 'Multi-metric decline.';
+          bits.push(
+            `${Math.abs(p.zScore).toFixed(1)} SD below their personal average`
+          );
+        if (p.direction === 'declining')
+          bits.push('declining 3 months in a row');
+        return bits.length
+          ? bits.join(' and ') + '.'
+          : 'Multi-metric decline.';
       }
       case 'opportunity':
         if (p.newlyThreshold)
-          return `Just reached the referral threshold — welcome and encourage.`;
-        return `3-month average ${p.zScore.toFixed(
+          return 'Just reached the referral threshold -- welcome and encourage.';
+        return `3-month average is ${p.zScore.toFixed(
           1
-        )}σ above personal norm — reinforce the relationship.`;
+        )} SD above this provider's personal norm -- reinforce the relationship.`;
+      default:
+        return '';
     }
   };
 
+  const decorate = (p, type) => ({
+    ...p,
+    arrow: trendArrow(p.direction),
+    reason: reasonFor(p, type),
+  });
+
   const action = {
-    thankList: strengths.map((p) => ({ ...p, reason: reasonFor(p, 'strength') })),
-    watchList: weaknesses.map((p) => ({ ...p, reason: reasonFor(p, 'weakness') })),
-    callList: threats.map((p) => ({ ...p, reason: reasonFor(p, 'threat') })),
-    welcomeList: opportunities.map((p) => ({
-      ...p,
-      reason: reasonFor(p, 'opportunity'),
-    })),
+    thankList: strengths.map((p) => decorate(p, 'strength')),
+    watchList: weaknesses.map((p) => decorate(p, 'weakness')),
+    callList: threats.map((p) => decorate(p, 'threat')),
+    welcomeList: opportunities.map((p) => decorate(p, 'opportunity')),
   };
 
   return {
     empty: false,
     reportMonth: { year: ry, month: rm },
     summary: {
-      thisMonthTotal,
-      lastMonthTotal,
-      sameMonthPriorYearTotal,
+      thisMonthTotal: Math.round(thisMonthTotal),
+      lastMonthTotal: Math.round(lastMonthTotal),
+      sameMonthPriorYearTotal: Math.round(sameMonthPriorYearTotal),
       momPct,
       yoyPct,
       activeProvidersThisMonth,
@@ -313,10 +333,10 @@ export function analyze(entries) {
       overallTrend,
     },
     swot: {
-      strengths: strengths.map((p) => enrich(p)),
-      weaknesses: weaknesses.map((p) => enrich(p)),
-      opportunities: opportunities.map((p) => enrich(p)),
-      threats: threats.map((p) => enrich(p)),
+      strengths: strengths.map(enrich),
+      weaknesses: weaknesses.map(enrich),
+      opportunities: opportunities.map(enrich),
+      threats: threats.map(enrich),
     },
     action,
   };
@@ -325,13 +345,13 @@ export function analyze(entries) {
 function enrich(p) {
   return {
     provider: p.provider,
-    last3Avg: round2(p.last3Avg),
-    priorAvg: round2(p.priorAvg),
+    last3Avg: round1(p.last3Avg),
+    priorAvg: round1(p.priorAvg),
     pctChange: p.pctChange == null ? null : round1(p.pctChange),
     direction: p.direction,
-    arrow: arrowFor(p.direction),
+    arrow: trendArrow(p.direction),
     zScore: round2(p.zScore),
-    totalEyes: p.totalEyes,
+    totalEyes: Math.round(p.totalEyes),
     monthsPresent: p.monthsPresent,
     newlyThreshold: p.newlyThreshold,
   };
