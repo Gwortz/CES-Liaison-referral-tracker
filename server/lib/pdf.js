@@ -10,6 +10,7 @@ const COLORS = {
   accent: '#1E88C4',
   text: '#1F2937',
   muted: '#6B7280',
+  zero: '#4B5563',
   strength: '#2F855A',
   weakness: '#B45309',
   opportunity: '#2B6CB0',
@@ -38,9 +39,12 @@ function pct(n) {
   return `${sign}${n.toFixed(1)}%`;
 }
 
-/**
- * Generates a PDF and returns a Promise<Buffer>.
- */
+function signed(n) {
+  if (n == null) return '--';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${Math.round(n)}`;
+}
+
 export function generateReport({ market, analysis }) {
   return new Promise((resolve, reject) => {
     try {
@@ -103,6 +107,8 @@ function renderExecutiveSummary(doc, analysis) {
     ['Year-over-year change', pct(s.yoyPct)],
     ['Active referring providers this month', fmt(s.activeProvidersThisMonth)],
     ['Qualifying providers in analysis', fmt(s.qualifyingCount)],
+    ['Providers with zero referrals this month', fmt(s.zeroReferralCount ?? 0)],
+    ['Providers on Call List (material decline)', fmt(s.callListCount ?? 0)],
   ];
 
   doc.font('Helvetica').fontSize(10).fillColor(COLORS.text);
@@ -115,7 +121,7 @@ function renderExecutiveSummary(doc, analysis) {
     .font('Helvetica-Oblique')
     .fillColor(COLORS.muted)
     .fontSize(10)
-    .text(s.overallTrend, { align: 'left' });
+    .text(s.overallAssessment || s.overallTrend, { align: 'left' });
 
   doc.moveDown(1);
 }
@@ -154,78 +160,83 @@ function renderTrailingForecast(doc, analysis) {
   doc.moveDown(1);
 }
 
+function providerLine(p) {
+  // "3mo X.X | 12mo Y.Y | prior-yr Z.Z for Oct-Dec 2024 | abs +N | trend ^^"
+  const segs = [
+    `3mo ${avg(p.last3Avg)}`,
+    `12mo ${avg(p.twelveMoAvg)}`,
+  ];
+  if (p.priorAvg != null) {
+    segs.push(`prior-yr ${avg(p.priorAvg)} for ${p.priorPeriodLabel}`);
+  } else {
+    segs.push('No prior year data');
+  }
+  if (p.absoluteChange != null) {
+    segs.push(`abs ${signed(p.absoluteChange)} eyes`);
+  }
+  segs.push(`trend ${p.trendSymbolAscii || p.arrow}`);
+  return segs.join(' | ');
+}
+
 function renderSWOT(doc, analysis) {
   sectionTitle(doc, 'SWOT Analysis');
 
   const swot = analysis.swot;
-  const quadrants = [
-    { label: 'Strengths', color: COLORS.strength, items: swot.strengths },
-    { label: 'Weaknesses', color: COLORS.weakness, items: swot.weaknesses },
-    { label: 'Opportunities', color: COLORS.opportunity, items: swot.opportunities },
-    { label: 'Threats', color: COLORS.threat, items: swot.threats },
+  // Render in priority order: Zero Referrals, Strengths, Threats, Weaknesses, Opportunities
+  const sections = [
+    { label: 'Zero Referrals This Month', color: COLORS.zero, items: swot.zeroReferrals || [] },
+    { label: 'Strengths (Surging)', color: COLORS.strength, items: swot.strengths || [] },
+    { label: 'Threats (Material Decline)', color: COLORS.threat, items: swot.threats || [] },
+    { label: 'Weaknesses (Softening)', color: COLORS.weakness, items: swot.weaknesses || [] },
+    { label: 'Opportunities (Emerging)', color: COLORS.opportunity, items: swot.opportunities || [] },
   ];
 
   const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const colWidth = (pageWidth - 10) / 2;
-  const startY = doc.y;
-  let leftY = startY;
-  let rightY = startY;
 
-  quadrants.forEach((q, i) => {
-    const isLeft = i % 2 === 0;
-    const x = isLeft ? doc.page.margins.left : doc.page.margins.left + colWidth + 10;
-    const y = isLeft ? leftY : rightY;
+  sections.forEach((q) => {
+    if (doc.y > doc.page.height - doc.page.margins.bottom - 80) doc.addPage();
+    const x = doc.page.margins.left;
+    const y = doc.y;
 
     doc.save();
-    doc.rect(x, y, colWidth, 14).fill(q.color);
+    doc.rect(x, y, pageWidth, 16).fill(q.color);
     doc
       .fillColor('#fff')
       .font('Helvetica-Bold')
-      .fontSize(10)
-      .text(`${q.label} (${q.items.length})`, x + 6, y + 2, {
-        width: colWidth - 12,
+      .fontSize(11)
+      .text(`${q.label} (${q.items.length})`, x + 8, y + 3, {
+        width: pageWidth - 16,
       });
     doc.restore();
 
-    let cursor = y + 18;
-    doc.fillColor(COLORS.text).font('Helvetica').fontSize(9);
+    doc.y = y + 20;
 
     if (!q.items.length) {
-      doc.fillColor(COLORS.muted).text('None this month.', x + 6, cursor, {
-        width: colWidth - 12,
-      });
-      cursor += 14;
-    } else {
-      q.items.forEach((p) => {
-        if (cursor > doc.page.height - doc.page.margins.bottom - 40) {
-          doc.addPage();
-          cursor = doc.page.margins.top;
-        }
-        doc
-          .font('Helvetica-Bold')
-          .fillColor(COLORS.text)
-          .fontSize(10)
-          .text(`${p.provider} ${p.arrow}`, x + 6, cursor, { width: colWidth - 12 });
-        cursor = doc.y;
-
-        const line = `3mo avg ${avg(p.last3Avg)} | prior-yr avg ${avg(
-          p.priorAvg
-        )} | ${pct(p.pctChange)} | ${p.direction}`;
-        doc
-          .font('Helvetica')
-          .fontSize(8.5)
-          .fillColor(COLORS.muted)
-          .text(line, x + 6, cursor, { width: colWidth - 12 });
-        cursor = doc.y + 4;
-      });
+      doc
+        .fillColor(COLORS.muted)
+        .font('Helvetica-Oblique')
+        .fontSize(9)
+        .text('None this month.', x + 8);
+      doc.moveDown(0.5);
+      return;
     }
 
-    if (isLeft) leftY = cursor + 10;
-    else rightY = cursor + 10;
+    q.items.forEach((p) => {
+      if (doc.y > doc.page.height - doc.page.margins.bottom - 40) doc.addPage();
+      doc
+        .font('Helvetica-Bold')
+        .fillColor(COLORS.text)
+        .fontSize(10)
+        .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`, x + 8);
+      doc
+        .font('Helvetica')
+        .fontSize(8.5)
+        .fillColor(COLORS.muted)
+        .text(providerLine(p), x + 8);
+      doc.moveDown(0.15);
+    });
+    doc.moveDown(0.4);
   });
-
-  doc.y = Math.max(leftY, rightY);
-  doc.moveDown(0.5);
 }
 
 function renderActionReport(doc, analysis) {
@@ -233,10 +244,11 @@ function renderActionReport(doc, analysis) {
   sectionTitle(doc, 'Monthly Action Report');
 
   const lists = [
-    { title: 'Thank List (Strengths -- keep the relationship)', color: COLORS.strength, items: analysis.action.thankList },
+    { title: 'Call List (Threats -- personal visit or call this week)', color: COLORS.threat, items: analysis.action.callList },
+    { title: 'Zero Referrals List (reach out personally)', color: COLORS.zero, items: analysis.action.zeroList || [] },
     { title: 'Watch List (Weaknesses -- monitor next month)', color: COLORS.weakness, items: analysis.action.watchList },
-    { title: 'Call List (Threats -- personal visit or call)', color: COLORS.threat, items: analysis.action.callList },
     { title: 'Welcome List (Opportunities -- reach out and encourage)', color: COLORS.opportunity, items: analysis.action.welcomeList },
+    { title: 'Thank List (Strengths -- keep the relationship warm)', color: COLORS.strength, items: analysis.action.thankList },
   ];
 
   lists.forEach((list) => {
@@ -263,16 +275,12 @@ function renderActionReport(doc, analysis) {
           .font('Helvetica-Bold')
           .fillColor(COLORS.text)
           .fontSize(10)
-          .text(`${p.provider} ${p.arrow}`);
+          .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`);
         doc
           .font('Helvetica')
           .fontSize(9)
           .fillColor(COLORS.muted)
-          .text(
-            `3mo avg ${avg(p.last3Avg)} | total ${whole(
-              p.totalEyes
-            )} eyes | ${pct(p.pctChange)}`
-          );
+          .text(providerLine(p));
         doc
           .font('Helvetica-Oblique')
           .fontSize(9)

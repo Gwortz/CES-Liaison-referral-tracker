@@ -23,6 +23,12 @@ function whole(n) {
   return Math.round(Number(n)).toString();
 }
 
+function signed(n) {
+  if (n == null) return '—';
+  const s = n > 0 ? '+' : '';
+  return `${s}${Math.round(n)}`;
+}
+
 export default function ReportPreview() {
   const navigate = useNavigate();
   const [payload, setPayload] = useState(null);
@@ -100,7 +106,9 @@ export default function ReportPreview() {
 
       <Section title="Executive Summary">
         <SummaryGrid summary={analysis.summary} />
-        <p className="mt-3 text-slate-600 italic">{analysis.summary.overallTrend}</p>
+        <p className="mt-3 text-slate-700">
+          {analysis.summary.overallAssessment || analysis.summary.overallTrend}
+        </p>
       </Section>
 
       <Section title="Trailing & Forecast">
@@ -108,30 +116,60 @@ export default function ReportPreview() {
       </Section>
 
       <Section title="SWOT Analysis">
-        <div className="grid md:grid-cols-2 gap-4">
-          <Quadrant label="Strengths" color="emerald" items={analysis.swot.strengths} />
-          <Quadrant label="Weaknesses" color="amber" items={analysis.swot.weaknesses} />
-          <Quadrant label="Opportunities" color="sky" items={analysis.swot.opportunities} />
-          <Quadrant label="Threats" color="red" items={analysis.swot.threats} />
+        <div className="space-y-4">
+          <Category
+            label="Zero Referrals This Month"
+            color="slate"
+            items={analysis.swot.zeroReferrals || []}
+          />
+          <Category
+            label="Strengths (Surging)"
+            color="emerald"
+            items={analysis.swot.strengths || []}
+          />
+          <Category
+            label="Threats (Material Decline)"
+            color="red"
+            items={analysis.swot.threats || []}
+          />
+          <Category
+            label="Weaknesses (Softening)"
+            color="amber"
+            items={analysis.swot.weaknesses || []}
+          />
+          <Category
+            label="Opportunities (Emerging)"
+            color="sky"
+            items={analysis.swot.opportunities || []}
+          />
         </div>
       </Section>
 
       <Section title="Monthly Action Report">
         <ActionList
-          title="Thank List — Strengths"
-          color="emerald"
-          items={analysis.action.thankList}
+          title="Call List — Threats (personal visit or call this week)"
+          color="red"
+          items={analysis.action.callList}
         />
         <ActionList
-          title="Watch List — Weaknesses"
+          title="Zero Referrals List (reach out personally)"
+          color="slate"
+          items={analysis.action.zeroList || []}
+        />
+        <ActionList
+          title="Watch List — Weaknesses (monitor next month)"
           color="amber"
           items={analysis.action.watchList}
         />
-        <ActionList title="Call List — Threats" color="red" items={analysis.action.callList} />
         <ActionList
-          title="Welcome List — Opportunities"
+          title="Welcome List — Opportunities (reach out and encourage)"
           color="sky"
           items={analysis.action.welcomeList}
+        />
+        <ActionList
+          title="Thank List — Strengths (keep the relationship warm)"
+          color="emerald"
+          items={analysis.action.thankList}
         />
       </Section>
     </div>
@@ -163,7 +201,7 @@ function TrailingForecast({ summary }) {
     {
       label: 'Referrals, last 3 months',
       value: whole(last3),
-      sub: `trailing through report month`,
+      sub: 'trailing through report month',
     },
     {
       label: 'Same 3 months, prior year',
@@ -208,6 +246,9 @@ function SummaryGrid({ summary }) {
     { label: 'MoM change', value: pct(summary.momPct) },
     { label: 'YoY change', value: pct(summary.yoyPct) },
     { label: 'Active providers', value: summary.activeProvidersThisMonth },
+    { label: 'Qualifying providers', value: summary.qualifyingCount },
+    { label: 'Zero-referral providers', value: summary.zeroReferralCount ?? 0 },
+    { label: 'Call List count', value: summary.callListCount ?? 0 },
   ];
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -229,25 +270,67 @@ const COLOR_CLASSES = {
     header: 'bg-emerald-700',
     border: 'border-emerald-200',
     tint: 'bg-emerald-50',
+    dot: 'bg-emerald-700',
   },
   amber: {
     header: 'bg-amber-600',
     border: 'border-amber-200',
     tint: 'bg-amber-50',
+    dot: 'bg-amber-600',
   },
   sky: {
     header: 'bg-sky-700',
     border: 'border-sky-200',
     tint: 'bg-sky-50',
+    dot: 'bg-sky-700',
   },
   red: {
     header: 'bg-red-700',
     border: 'border-red-200',
     tint: 'bg-red-50',
+    dot: 'bg-red-700',
+  },
+  slate: {
+    header: 'bg-slate-600',
+    border: 'border-slate-200',
+    tint: 'bg-slate-50',
+    dot: 'bg-slate-600',
   },
 };
 
-function Quadrant({ label, color, items }) {
+function ProviderMetaLine({ p }) {
+  const parts = [
+    <span key="a">3mo <b>{avg(p.last3Avg)}</b></span>,
+    <span key="b">12mo <b>{avg(p.twelveMoAvg)}</b></span>,
+  ];
+  if (p.priorAvg != null) {
+    parts.push(
+      <span key="c">
+        prior-yr <b>{avg(p.priorAvg)}</b> for {p.priorPeriodLabel}
+      </span>
+    );
+  } else {
+    parts.push(<span key="c" className="italic">No prior year data</span>);
+  }
+  if (p.absoluteChange != null) {
+    parts.push(<span key="d">abs <b>{signed(p.absoluteChange)}</b> eyes</span>);
+  }
+  parts.push(
+    <span key="t">trend <b className="font-mono">{p.trendSymbol || p.arrow}</b></span>
+  );
+  return (
+    <div className="text-xs text-slate-600">
+      {parts.map((el, i) => (
+        <span key={i}>
+          {i > 0 ? <span className="mx-1 text-slate-400">·</span> : null}
+          {el}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Category({ label, color, items }) {
   const c = COLOR_CLASSES[color];
   return (
     <div className={`rounded-lg border ${c.border} overflow-hidden`}>
@@ -259,11 +342,13 @@ function Quadrant({ label, color, items }) {
         {items.map((p) => (
           <div key={p.provider} className="bg-white rounded-md border border-slate-200 p-2">
             <div className="font-medium text-slate-800">
-              {p.provider} <span className="text-slate-500">{p.arrow}</span>
+              {p.provider}{' '}
+              <span className="text-slate-500 font-mono">{p.trendSymbol || p.arrow}</span>
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
+                {p.tier} tier
+              </span>
             </div>
-            <div className="text-xs text-slate-600">
-              3mo avg {avg(p.last3Avg)} · prior-yr avg {avg(p.priorAvg)} · {pct(p.pctChange)} · {p.direction}
-            </div>
+            <ProviderMetaLine p={p} />
           </div>
         ))}
       </div>
@@ -275,9 +360,9 @@ function ActionList({ title, color, items }) {
   const c = COLOR_CLASSES[color];
   return (
     <div className="mb-5">
-      <h3 className={`font-semibold mb-2 text-slate-800`}>
+      <h3 className="font-semibold mb-2 text-slate-800">
         <span
-          className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${c.header}`}
+          className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${c.dot}`}
         ></span>
         {title} ({items.length})
       </h3>
@@ -289,12 +374,14 @@ function ActionList({ title, color, items }) {
             className="bg-white rounded-md border border-slate-200 p-3"
           >
             <div className="font-medium text-slate-800">
-              {p.provider} <span className="text-slate-500">{p.arrow}</span>
+              {p.provider}{' '}
+              <span className="text-slate-500 font-mono">{p.trendSymbol || p.arrow}</span>
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
+                {p.tier} tier
+              </span>
             </div>
-            <div className="text-xs text-slate-500 mb-1">
-              3mo avg {avg(p.last3Avg)} · total {whole(p.totalEyes)} eyes · {pct(p.pctChange)}
-            </div>
-            <div className="text-sm text-slate-700 italic">{p.reason}</div>
+            <ProviderMetaLine p={p} />
+            <div className="text-sm text-slate-700 italic mt-1">{p.reason}</div>
           </div>
         ))}
       </div>
