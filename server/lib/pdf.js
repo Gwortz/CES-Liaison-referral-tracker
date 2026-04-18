@@ -45,6 +45,10 @@ function signed(n) {
   return `${sign}${Math.round(n)}`;
 }
 
+function displayName(name) {
+  return String(name || '').replace(/\s+,/g, ',').replace(/\s{2,}/g, ' ').trim();
+}
+
 export function generateReport({ market, analysis }) {
   return new Promise((resolve, reject) => {
     try {
@@ -122,6 +126,15 @@ function renderExecutiveSummary(doc, analysis) {
     .fillColor(COLORS.muted)
     .fontSize(10)
     .text(s.overallAssessment || s.overallTrend, { align: 'left' });
+
+  if (s.contradictingTrendsNote) {
+    doc.moveDown(0.4);
+    doc
+      .font('Helvetica-Bold')
+      .fillColor(COLORS.accent)
+      .fontSize(10)
+      .text(s.contradictingTrendsNote, { align: 'left' });
+  }
 
   doc.moveDown(1);
 }
@@ -241,7 +254,7 @@ function renderSWOT(doc, analysis) {
         .font('Helvetica-Bold')
         .fillColor(COLORS.text)
         .fontSize(10)
-        .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`, x + 8);
+        .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}`, x + 8);
       doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.muted);
       for (const line of providerLines(p)) {
         doc.text(line, x + 8);
@@ -288,7 +301,7 @@ function renderActionReport(doc, analysis) {
           .font('Helvetica-Bold')
           .fillColor(COLORS.text)
           .fontSize(10)
-          .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`);
+          .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}`);
         doc.font('Helvetica').fontSize(9).fillColor(COLORS.muted);
         for (const line of providerLines(p)) {
           doc.text(line);

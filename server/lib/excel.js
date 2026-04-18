@@ -22,7 +22,7 @@ function toTitleCase(s) {
  * - canonicalize Roman numerals II / III
  * - tidy double commas and extra spaces
  */
-function cleanNameForDisplay(name) {
+export function cleanNameForDisplay(name) {
   return name
     .trim()
     .replace(/\s+/g, ' ')
@@ -35,6 +35,7 @@ function cleanNameForDisplay(name) {
     .replace(/,\s*,/g, ',')
     .replace(/,\s*$/g, '')
     .replace(/\s{2,}/g, ' ')
+    .replace(/\s+,/g, ',') // strip space before comma ("Glenn , Jason" -> "Glenn, Jason")
     .trim();
 }
 

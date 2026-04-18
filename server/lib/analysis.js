@@ -21,6 +21,11 @@ const MONTH_SHORT = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
+const MONTH_FULL = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 function monthKey(year, month) {
   return year * 12 + (month - 1);
 }
@@ -240,16 +245,28 @@ function tierForAvg(twelveMoAvg) {
   return { name: 'low', threshold: 2 };
 }
 
-// Trend symbols: ASCII for PDF safety (WinAnsi), Unicode for web display.
-const TREND_SYMBOL_ASCII = { increasing: '^', declining: 'v', flat: '-', insufficient: '?' };
-const TREND_SYMBOL_UNI = { increasing: '\u25B2', declining: '\u25BC', flat: '\u2192', insufficient: '?' };
+// Trend labels — plain readable text (Option B). PDFKit's default Helvetica
+// uses WinAnsi encoding and cannot render Unicode arrows reliably, so we use
+// the same bracketed labels in both PDF and web outputs.
+const TREND_LABEL = {
+  increasing: 'UP',
+  declining: 'DOWN',
+  flat: 'STABLE',
+  insufficient: 'UNKNOWN',
+};
 
-function combinedSymbol(t3, t12, pickMap) {
-  return `${pickMap[t3] || pickMap.insufficient}${pickMap[t12] || pickMap.insufficient}`;
+function combinedSymbol(t3, t12) {
+  const a = TREND_LABEL[t3] || TREND_LABEL.insufficient;
+  const b = TREND_LABEL[t12] || TREND_LABEL.insufficient;
+  return `[${a}/${b}]`;
+}
+
+function singleSymbol(t) {
+  return `[${TREND_LABEL[t] || TREND_LABEL.insufficient}]`;
 }
 
 export function trendArrow(trend) {
-  return TREND_SYMBOL_ASCII[trend] || '-';
+  return singleSymbol(trend);
 }
 
 export function analyze(entries) {
@@ -326,6 +343,13 @@ export function analyze(entries) {
     });
   }
 
+  // Compute top-15 by total historical referral volume BEFORE the SWOT loop.
+  // This ranking is fixed and must drive Strengths selection.
+  const topByVolume = Array.from(qualifying.values()).sort(
+    (a, b) => b.totalEyes - a.totalEyes
+  );
+  const top15 = new Set(topByVolume.slice(0, 15).map((p) => p.provider));
+
   // Classification in strict priority order:
   //   1) Zero Referrals -> 2) Strengths -> 3) Threats
   //   -> 4) Weaknesses -> 5) Opportunities
@@ -342,12 +366,14 @@ export function analyze(entries) {
       continue;
     }
 
-    // 2) Strengths — surging providers
-    //    last3Avg - twelveMoAvg >= tier.threshold AND threeMonthTrend === 'increasing'
-    const surging =
-      (p.last3Avg - p.twelveMoAvg) >= p.tier.threshold &&
-      p.threeMonthTrend === 'increasing';
-    if (surging) {
+    // 2) Strengths — top-15 by total historical volume, non-declining at
+    //    both resolutions, and still producing meaningful volume (>=5/mo).
+    const isStrength =
+      top15.has(p.provider) &&
+      p.threeMonthTrend !== 'declining' &&
+      p.twelveMonthTrend !== 'declining' &&
+      p.last3Avg >= 5;
+    if (isStrength) {
       strengths.push(p);
       continue;
     }
@@ -364,7 +390,7 @@ export function analyze(entries) {
       continue;
     }
 
-    // 4) Weaknesses — softening, below 12mo baseline or declining trend
+    // 4) Weaknesses — softening, below 12mo baseline or declining trend.
     //    Excludes seasonal dips: if priorAvg < twelveMoAvg (seasonal low),
     //    only flag when (priorAvg - last3Avg) >= tier.threshold.
     const belowBaseline = (p.twelveMoAvg - p.last3Avg) >= p.tier.threshold;
@@ -380,10 +406,21 @@ export function analyze(entries) {
       continue;
     }
 
-    // 5) Opportunities — new qualifiers, or improving without surging
-    const improving =
-      p.threeMonthTrend === 'increasing' || p.twelveMonthTrend === 'increasing';
-    if (p.isNewProvider || improving) {
+    // 5) Opportunities — strict positive criteria only.
+    //    Hard exclusions first:
+    if (p.absoluteChange != null && p.absoluteChange < 0) continue;
+    if (p.threeMonthTrend === 'declining') continue;
+    if (p.twelveMonthTrend === 'declining') continue;
+
+    const pathNewQualifier =
+      p.isNewProvider && p.threeMonthTrend !== 'declining';
+    const pathImproving =
+      p.absoluteChange != null &&
+      p.absoluteChange > 0 &&
+      p.threeMonthTrend !== 'declining' &&
+      p.twelveMonthTrend !== 'declining';
+
+    if (pathNewQualifier || pathImproving) {
       opportunities.push(p);
       continue;
     }
@@ -391,7 +428,11 @@ export function analyze(entries) {
 
   // Sort strategies
   zeroReferrals.sort((a, b) => b.twelveMoAvg - a.twelveMoAvg);
-  strengths.sort((a, b) => (b.last3Avg - b.twelveMoAvg) - (a.last3Avg - a.twelveMoAvg));
+  // Strengths: rank by top-15 historical volume order (Stallard first, etc.)
+  const volumeRank = new Map(topByVolume.map((p, i) => [p.provider, i]));
+  strengths.sort(
+    (a, b) => (volumeRank.get(a.provider) ?? 9999) - (volumeRank.get(b.provider) ?? 9999)
+  );
   // Threats: rank by absoluteChange ascending (most negative first)
   threats.sort((a, b) => {
     const av = a.absoluteChange ?? (a.last3Avg - a.twelveMoAvg) * 3;
@@ -399,7 +440,13 @@ export function analyze(entries) {
     return av - bv;
   });
   weaknesses.sort((a, b) => (a.last3Avg - a.twelveMoAvg) - (b.last3Avg - b.twelveMoAvg));
-  opportunities.sort((a, b) => (b.last3Avg - b.twelveMoAvg) - (a.last3Avg - a.twelveMoAvg));
+  // Opportunities: rank by absoluteChange descending (biggest positive first),
+  // new qualifiers (absoluteChange=null) last.
+  opportunities.sort((a, b) => {
+    const av = a.absoluteChange ?? -1;
+    const bv = b.absoluteChange ?? -1;
+    return bv - av;
+  });
 
   // ---- Executive summary aggregates ----
   const thisMonthTotal = monthTotal(entries, ry, rm);
@@ -441,6 +488,10 @@ export function analyze(entries) {
     predictionMethod = 'linear extrapolation';
   }
 
+  const trailing3YoyPct =
+    priorYear3MonthsTotal > 0
+      ? ((last3MonthsTotal - priorYear3MonthsTotal) / priorYear3MonthsTotal) * 100
+      : null;
   const momPct =
     lastMonthTotal > 0
       ? ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100
@@ -461,6 +512,14 @@ export function analyze(entries) {
       opportunities: opportunities.length,
       zeroReferrals: zeroReferrals.length,
     },
+  });
+
+  // Contradicting-trends note: only when single-month YoY and trailing 3-month
+  // YoY point in opposite directions (each with >1% magnitude).
+  const contradictingTrendsNote = buildContradictingTrendsNote({
+    yoyPct,
+    trailing3YoyPct,
+    reportMonthName: MONTH_FULL[rm - 1],
   });
 
   // Short overallTrend line (preserved for compatibility with existing UI/PDF helpers)
@@ -488,7 +547,7 @@ export function analyze(entries) {
     const prior = p.priorAvg == null ? null : p.priorAvg.toFixed(1);
     switch (type) {
       case 'strength':
-        return `Surging: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo (${tierName} tier, +${p.tier.threshold} threshold). 3-mo trend increasing -- thank and keep engaged.`;
+        return `Top-15 historical volume (${Math.round(p.totalEyes)} total eyes). 3-mo monthly avg ${last3} eyes/mo, 12-mo monthly avg ${twelve} eyes/mo, both trends stable or growing -- thank and keep engaged.`;
       case 'threat': {
         if (prior != null && p.absoluteChange != null) {
           return `Material decline: 3-mo monthly avg ${last3} eyes/mo vs prior-year ${prior} eyes/mo for ${priorPeriodLabel} (${tierName} tier). Absolute change ${p.absoluteChange} eyes -- call immediately.`;
@@ -536,12 +595,14 @@ export function analyze(entries) {
       sameMonthPriorYearTotal: Math.round(sameMonthPriorYearTotal),
       momPct,
       yoyPct,
+      trailing3YoyPct,
       activeProvidersThisMonth,
       qualifyingCount: qualifying.size,
       zeroReferralCount: zeroReferrals.length,
       callListCount: threats.length,
       overallTrend,
       overallAssessment,
+      contradictingTrendsNote,
       last3MonthsTotal: Math.round(last3MonthsTotal),
       priorYear3MonthsTotal: Math.round(priorYear3MonthsTotal),
       ytdTotal: Math.round(ytdTotal),
@@ -560,6 +621,26 @@ export function analyze(entries) {
     },
     action,
   };
+}
+
+function buildContradictingTrendsNote({ yoyPct, trailing3YoyPct, reportMonthName }) {
+  if (yoyPct == null || trailing3YoyPct == null) return null;
+  const THR = 1; // %-point threshold to count either direction as material
+  if (Math.abs(yoyPct) <= THR || Math.abs(trailing3YoyPct) <= THR) return null;
+  // Opposite signs only
+  if ((yoyPct > 0) === (trailing3YoyPct > 0)) return null;
+
+  const monthSign = yoyPct > 0 ? '+' : '-';
+  const monthAbs = Math.abs(yoyPct).toFixed(1);
+  const trailDir = trailing3YoyPct > 0 ? 'up' : 'down';
+  const trailAbs = Math.abs(trailing3YoyPct).toFixed(1);
+  const tone = yoyPct > 0 ? 'strong' : 'soft';
+  const recovery =
+    yoyPct > 0
+      ? `${reportMonthName} may be partially recovering from softer prior months rather than representing a sustained trend change`
+      : `${reportMonthName} may reflect a temporary dip rather than a sustained reversal of the positive trailing trend`;
+
+  return `Note: The ${tone} ${reportMonthName} performance (${monthSign}${monthAbs}% vs last year) contrasts with the trailing 3-month period which is ${trailDir} ${trailAbs}% vs the same period last year. This suggests ${recovery}. Monitor over the next 2-3 months to confirm direction.`;
 }
 
 function buildOverallAssessment({ momPct, yoyPct, counts }) {
@@ -587,7 +668,7 @@ function buildOverallAssessment({ momPct, yoyPct, counts }) {
       ? 'momentum is positive -- prioritize thank-you touches and nurture opportunities'
       : 'the month is mixed -- balance retention visits with outreach to softening providers';
 
-  return `Overall referrals are ${momText} and ${yoyText}. ${counts.strengths} provider(s) are surging, ${counts.threats} show material decline, ${counts.weaknesses} are softening, ${counts.opportunities} are emerging opportunities, and ${counts.zeroReferrals} sent zero this month. Recommendation: ${tone}.`;
+  return `Overall referrals are ${momText} and ${yoyText}. ${counts.strengths} top-volume provider(s) are stable or growing, ${counts.threats} show material decline, ${counts.weaknesses} are softening, ${counts.opportunities} are emerging opportunities, and ${counts.zeroReferrals} sent zero this month. Recommendation: ${tone}.`;
 }
 
 function enrich(p, labels) {
@@ -596,8 +677,7 @@ function enrich(p, labels) {
     typeof labels === 'string'
       ? { priorPeriodLabel: labels, prev3PeriodLabel: '', prev12PeriodLabel: '' }
       : labels || {};
-  const trendSymbolAscii = combinedSymbol(p.threeMonthTrend, p.twelveMonthTrend, TREND_SYMBOL_ASCII);
-  const trendSymbol = combinedSymbol(p.threeMonthTrend, p.twelveMonthTrend, TREND_SYMBOL_UNI);
+  const trendLabel = combinedSymbol(p.threeMonthTrend, p.twelveMonthTrend);
 
   // Per-resolution deltas: current rolling avg vs immediately-preceding rolling avg.
   // Threshold uses the tier's eyes-per-month sensitivity.
@@ -607,6 +687,8 @@ function enrich(p, labels) {
   const bucket = (d) => (d >= tierThr ? 'increasing' : d <= -tierThr ? 'declining' : 'flat');
   const d3Bucket = bucket(delta3);
   const d12Bucket = bucket(delta12);
+  const d3Label = singleSymbol(d3Bucket);
+  const d12Label = singleSymbol(d12Bucket);
 
   return {
     provider: p.provider,
@@ -621,10 +703,10 @@ function enrich(p, labels) {
     // Per-resolution deltas and arrows
     delta3: round1(delta3),
     delta12: round1(delta12),
-    delta3Symbol: TREND_SYMBOL_UNI[d3Bucket],
-    delta3SymbolAscii: TREND_SYMBOL_ASCII[d3Bucket],
-    delta12Symbol: TREND_SYMBOL_UNI[d12Bucket],
-    delta12SymbolAscii: TREND_SYMBOL_ASCII[d12Bucket],
+    delta3Symbol: d3Label,
+    delta3SymbolAscii: d3Label,
+    delta12Symbol: d12Label,
+    delta12SymbolAscii: d12Label,
     // Prior-year same 3-month comparison (nullable)
     priorAvg: p.priorAvg == null ? null : round1(p.priorAvg),
     priorPeriodLabel: p.priorAvg == null ? 'No prior year data' : (lbls.priorPeriodLabel || ''),
@@ -633,9 +715,9 @@ function enrich(p, labels) {
     // Dual overall trend
     threeMonthTrend: p.threeMonthTrend,
     twelveMonthTrend: p.twelveMonthTrend,
-    trendSymbol,        // Unicode: for web display
-    trendSymbolAscii,   // ASCII: for PDF (WinAnsi safe)
-    arrow: trendSymbolAscii, // legacy alias
+    trendSymbol: trendLabel,        // same bracketed label in web and PDF
+    trendSymbolAscii: trendLabel,   // same bracketed label in web and PDF
+    arrow: trendLabel,              // legacy alias
     direction: p.threeMonthTrend, // legacy alias
     tier: p.tier.name,
     tierThreshold: p.tier.threshold,

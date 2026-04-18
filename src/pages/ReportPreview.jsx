@@ -109,6 +109,11 @@ export default function ReportPreview() {
         <p className="mt-3 text-slate-700">
           {analysis.summary.overallAssessment || analysis.summary.overallTrend}
         </p>
+        {analysis.summary.contradictingTrendsNote && (
+          <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            {analysis.summary.contradictingTrendsNote}
+          </div>
+        )}
       </Section>
 
       <Section title="Trailing & Forecast">
@@ -304,6 +309,10 @@ function signedDec(n) {
   return `${s}${Number(n).toFixed(1)}`;
 }
 
+function displayName(name) {
+  return String(name || '').replace(/\s+,/g, ',').replace(/\s{2,}/g, ' ').trim();
+}
+
 function ProviderMetaLine({ p }) {
   return (
     <div className="text-xs text-slate-700 mt-1 space-y-0.5">
@@ -367,7 +376,7 @@ function Category({ label, color, items }) {
         {items.map((p) => (
           <div key={p.provider} className="bg-white rounded-md border border-slate-200 p-2">
             <div className="font-medium text-slate-800">
-              {p.provider}{' '}
+              {displayName(p.provider)}{' '}
               <span className="text-slate-500 font-mono">{p.trendSymbol || p.arrow}</span>
               <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
                 {p.tier} tier
@@ -399,7 +408,7 @@ function ActionList({ title, color, items }) {
             className="bg-white rounded-md border border-slate-200 p-3"
           >
             <div className="font-medium text-slate-800">
-              {p.provider}{' '}
+              {displayName(p.provider)}{' '}
               <span className="text-slate-500 font-mono">{p.trendSymbol || p.arrow}</span>
               <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
                 {p.tier} tier
