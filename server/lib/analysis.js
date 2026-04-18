@@ -34,16 +34,28 @@ function monthLabel(k) {
   return `${MONTH_SHORT[month - 1]} ${year}`;
 }
 
-function priorYearPeriodLabel(rmKey) {
-  // Prior-year same 3 months ending rmKey-12
-  const endK = rmKey - 12;
-  const startK = endK - 2;
+function periodLabel(startK, endK) {
   const s = fromMonthKey(startK);
   const e = fromMonthKey(endK);
   if (s.year === e.year) {
     return `${MONTH_SHORT[s.month - 1]}-${MONTH_SHORT[e.month - 1]} ${e.year}`;
   }
   return `${MONTH_SHORT[s.month - 1]} ${s.year}-${MONTH_SHORT[e.month - 1]} ${e.year}`;
+}
+
+function priorYearPeriodLabel(rmKey) {
+  // Prior-year same 3 months ending rmKey-12
+  return periodLabel(rmKey - 14, rmKey - 12);
+}
+
+function prev3PeriodLabel(rmKey) {
+  // Preceding 3-month window: [rmKey-5, rmKey-4, rmKey-3]
+  return periodLabel(rmKey - 5, rmKey - 3);
+}
+
+function prev12PeriodLabel(rmKey) {
+  // Preceding 12-month window: [rmKey-23 .. rmKey-12]
+  return periodLabel(rmKey - 23, rmKey - 12);
 }
 
 function buildByMonth(arr) {
@@ -109,36 +121,31 @@ function qualifyingAsOf(byMonth, rmKey) {
 }
 
 /**
- * 3-month rolling average across [rmKey-2, rmKey-1, rmKey].
- * Missing months: if the provider has any activity in the prior 6 months
- * (rmKey-8..rmKey-3), treat the missing month as 0 (they went dormant).
- * Otherwise exclude that slot (they simply weren't around yet).
- * Returns { avg, sufficient, valuesForTrend } where valuesForTrend is an
- * array of length 3 with nulls where excluded, used by threeMonthTrend.
+ * 3-month rolling average across [endKey-2, endKey-1, endKey].
+ * Missing months: if the provider has any activity in the 6 months immediately
+ * preceding this window (endKey-8..endKey-3), treat the missing month as 0
+ * (they went dormant). Otherwise exclude that slot (they weren't around yet).
+ * Returns { avg, sufficient, valuesForTrend }.
  */
-function threeMonthWindow(byMonth, rmKey) {
-  const slots = [rmKey - 2, rmKey - 1, rmKey];
+function threeMonthWindowAt(byMonth, endKey) {
+  const slots = [endKey - 2, endKey - 1, endKey];
   const values = [];
   const valuesForTrend = [];
-  let hasAny = false;
   for (const k of slots) {
     if (byMonth.has(k)) {
       const v = byMonth.get(k) || 0;
       values.push(v);
       valuesForTrend.push(v);
-      hasAny = true;
     } else {
-      // Check the prior 6 months for activity
       let priorActivity = false;
-      for (let j = rmKey - 8; j <= rmKey - 3; j++) {
+      for (let j = endKey - 8; j <= endKey - 3; j++) {
         if ((byMonth.get(j) || 0) > 0) { priorActivity = true; break; }
       }
       if (priorActivity) {
         values.push(0);
         valuesForTrend.push(0);
-        hasAny = true;
       } else {
-        valuesForTrend.push(null); // exclude
+        valuesForTrend.push(null);
       }
     }
   }
@@ -147,18 +154,28 @@ function threeMonthWindow(byMonth, rmKey) {
   return { avg, sufficient, valuesForTrend };
 }
 
+// Back-compat wrapper for current-window call sites.
+function threeMonthWindow(byMonth, rmKey) {
+  return threeMonthWindowAt(byMonth, rmKey);
+}
+
 /**
- * 12-month rolling average across [rmKey-11..rmKey], averaging ONLY months
- * where eyes > 0 (excluding zero/missing months).
+ * 12-month rolling average across [endKey-11..endKey], averaging ONLY months
+ * where eyes > 0 (excluding zero/missing months). Returns 0 when no non-zero
+ * months exist in the window.
  */
-function twelveMonthAverage(byMonth, rmKey) {
+function twelveMonthAverageAt(byMonth, endKey) {
   const nonZero = [];
-  for (let k = rmKey - 11; k <= rmKey; k++) {
+  for (let k = endKey - 11; k <= endKey; k++) {
     const v = byMonth.get(k) || 0;
     if (v > 0) nonZero.push(v);
   }
   if (!nonZero.length) return 0;
   return nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+}
+
+function twelveMonthAverage(byMonth, rmKey) {
+  return twelveMonthAverageAt(byMonth, rmKey);
 }
 
 /**
@@ -242,6 +259,13 @@ export function analyze(entries) {
   const { year: ry, month: rm } = reportMonth;
   const rmKey = monthKey(ry, rm);
   const priorPeriodLabel = priorYearPeriodLabel(rmKey);
+  const prev3Period = prev3PeriodLabel(rmKey);
+  const prev12Period = prev12PeriodLabel(rmKey);
+  const labels = {
+    priorPeriodLabel,
+    prev3PeriodLabel: prev3Period,
+    prev12PeriodLabel: prev12Period,
+  };
 
   const series = buildProviderSeries(entries);
 
@@ -256,6 +280,9 @@ export function analyze(entries) {
 
     const { avg: last3Avg, valuesForTrend } = threeMonthWindow(byMonth, rmKey);
     const twelveMoAvg = twelveMonthAverage(byMonth, rmKey);
+    // Immediately-preceding rolling windows, for trend context
+    const { avg: prev3Avg } = threeMonthWindowAt(byMonth, rmKey - 3);
+    const prev12Avg = twelveMonthAverageAt(byMonth, rmKey - 12);
     const priorAvg = priorYearSame3Avg(byMonth, rmKey);
     const absoluteChange = priorAvg == null
       ? null
@@ -283,6 +310,8 @@ export function analyze(entries) {
       monthsPresent,
       last3Avg,
       twelveMoAvg,
+      prev3Avg,
+      prev12Avg,
       priorAvg, // may be null
       absoluteChange, // may be null
       pctChange, // may be null
@@ -451,7 +480,7 @@ export function analyze(entries) {
     overallTrend = `Overall referrals are ${parts.join(' and ')}.`;
   }
 
-  // Reason text per bucket — plain ASCII, no Unicode.
+  // Reason text per bucket — plain ASCII, no Unicode. All averages are eyes/month.
   const reasonFor = (p, type) => {
     const tierName = p.tier.name;
     const last3 = p.last3Avg.toFixed(1);
@@ -459,26 +488,26 @@ export function analyze(entries) {
     const prior = p.priorAvg == null ? null : p.priorAvg.toFixed(1);
     switch (type) {
       case 'strength':
-        return `Surging: 3mo avg ${last3} vs 12mo avg ${twelve} (${tierName} tier, +${p.tier.threshold} threshold). 3mo trend increasing -- thank and keep engaged.`;
+        return `Surging: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo (${tierName} tier, +${p.tier.threshold} threshold). 3-mo trend increasing -- thank and keep engaged.`;
       case 'threat': {
         if (prior != null && p.absoluteChange != null) {
-          return `Material decline: 3mo avg ${last3} vs prior ${prior} for ${priorPeriodLabel} (${tierName} tier). Absolute change ${p.absoluteChange} eyes -- call immediately.`;
+          return `Material decline: 3-mo monthly avg ${last3} eyes/mo vs prior-year ${prior} eyes/mo for ${priorPeriodLabel} (${tierName} tier). Absolute change ${p.absoluteChange} eyes -- call immediately.`;
         }
-        return `Material decline: 3mo avg ${last3} vs 12mo avg ${twelve} (${tierName} tier, no prior year data) -- call immediately.`;
+        return `Material decline: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo (${tierName} tier, no prior year data) -- call immediately.`;
       }
       case 'weakness': {
         if (prior != null) {
-          return `Softening: 3mo avg ${last3} vs 12mo avg ${twelve}, prior-year ${prior} (${tierName} tier) -- watch next month.`;
+          return `Softening: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo, prior-year ${prior} eyes/mo (${tierName} tier) -- watch next month.`;
         }
-        return `Softening: 3mo avg ${last3} vs 12mo avg ${twelve} (${tierName} tier, no prior year data) -- watch next month.`;
+        return `Softening: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo (${tierName} tier, no prior year data) -- watch next month.`;
       }
       case 'opportunity':
         if (p.isNewProvider) {
-          return `Newly qualifying provider (3mo avg ${last3}, 12mo avg ${twelve}) -- welcome and encourage.`;
+          return `Newly qualifying provider (3-mo monthly avg ${last3} eyes/mo, 12-mo monthly avg ${twelve} eyes/mo) -- welcome and encourage.`;
         }
-        return `Improving: 3mo avg ${last3} vs 12mo avg ${twelve} (${tierName} tier) -- reinforce the relationship.`;
+        return `Improving: 3-mo monthly avg ${last3} eyes/mo vs 12-mo monthly avg ${twelve} eyes/mo (${tierName} tier) -- reinforce the relationship.`;
       case 'zero': {
-        return `No referrals this month; 12mo avg was ${twelve} (${tierName} tier) -- personal outreach needed.`;
+        return `No referrals this month; 12-mo monthly avg was ${twelve} eyes/mo (${tierName} tier) -- personal outreach needed.`;
       }
       default:
         return '';
@@ -486,7 +515,7 @@ export function analyze(entries) {
   };
 
   const decorate = (p, type) => {
-    const e = enrich(p, priorPeriodLabel);
+    const e = enrich(p, labels);
     return { ...e, reason: reasonFor(p, type) };
   };
 
@@ -519,13 +548,15 @@ export function analyze(entries) {
       predictedAnnualTotal: Math.round(predictedAnnualTotal),
       predictionMethod,
       priorPeriodLabel,
+      prev3PeriodLabel: prev3Period,
+      prev12PeriodLabel: prev12Period,
     },
     swot: {
-      zeroReferrals: zeroReferrals.map((p) => enrich(p, priorPeriodLabel)),
-      strengths: strengths.map((p) => enrich(p, priorPeriodLabel)),
-      threats: threats.map((p) => enrich(p, priorPeriodLabel)),
-      weaknesses: weaknesses.map((p) => enrich(p, priorPeriodLabel)),
-      opportunities: opportunities.map((p) => enrich(p, priorPeriodLabel)),
+      zeroReferrals: zeroReferrals.map((p) => enrich(p, labels)),
+      strengths: strengths.map((p) => enrich(p, labels)),
+      threats: threats.map((p) => enrich(p, labels)),
+      weaknesses: weaknesses.map((p) => enrich(p, labels)),
+      opportunities: opportunities.map((p) => enrich(p, labels)),
     },
     action,
   };
@@ -559,17 +590,47 @@ function buildOverallAssessment({ momPct, yoyPct, counts }) {
   return `Overall referrals are ${momText} and ${yoyText}. ${counts.strengths} provider(s) are surging, ${counts.threats} show material decline, ${counts.weaknesses} are softening, ${counts.opportunities} are emerging opportunities, and ${counts.zeroReferrals} sent zero this month. Recommendation: ${tone}.`;
 }
 
-function enrich(p, priorPeriodLabel) {
+function enrich(p, labels) {
+  // Accept either the legacy (string) or new (object) form
+  const lbls =
+    typeof labels === 'string'
+      ? { priorPeriodLabel: labels, prev3PeriodLabel: '', prev12PeriodLabel: '' }
+      : labels || {};
   const trendSymbolAscii = combinedSymbol(p.threeMonthTrend, p.twelveMonthTrend, TREND_SYMBOL_ASCII);
   const trendSymbol = combinedSymbol(p.threeMonthTrend, p.twelveMonthTrend, TREND_SYMBOL_UNI);
+
+  // Per-resolution deltas: current rolling avg vs immediately-preceding rolling avg.
+  // Threshold uses the tier's eyes-per-month sensitivity.
+  const tierThr = p.tier.threshold;
+  const delta3 = p.last3Avg - p.prev3Avg;
+  const delta12 = p.twelveMoAvg - p.prev12Avg;
+  const bucket = (d) => (d >= tierThr ? 'increasing' : d <= -tierThr ? 'declining' : 'flat');
+  const d3Bucket = bucket(delta3);
+  const d12Bucket = bucket(delta12);
+
   return {
     provider: p.provider,
+    // Current rolling monthly averages (eyes/month)
     last3Avg: round1(p.last3Avg),
     twelveMoAvg: round1(p.twelveMoAvg),
+    // Immediately-preceding rolling monthly averages (eyes/month)
+    prev3Avg: round1(p.prev3Avg),
+    prev12Avg: round1(p.prev12Avg),
+    prev3PeriodLabel: lbls.prev3PeriodLabel || '',
+    prev12PeriodLabel: lbls.prev12PeriodLabel || '',
+    // Per-resolution deltas and arrows
+    delta3: round1(delta3),
+    delta12: round1(delta12),
+    delta3Symbol: TREND_SYMBOL_UNI[d3Bucket],
+    delta3SymbolAscii: TREND_SYMBOL_ASCII[d3Bucket],
+    delta12Symbol: TREND_SYMBOL_UNI[d12Bucket],
+    delta12SymbolAscii: TREND_SYMBOL_ASCII[d12Bucket],
+    // Prior-year same 3-month comparison (nullable)
     priorAvg: p.priorAvg == null ? null : round1(p.priorAvg),
-    priorPeriodLabel: p.priorAvg == null ? 'No prior year data' : priorPeriodLabel,
+    priorPeriodLabel: p.priorAvg == null ? 'No prior year data' : (lbls.priorPeriodLabel || ''),
     absoluteChange: p.absoluteChange == null ? null : Math.round(p.absoluteChange),
     pctChange: p.pctChange == null ? null : round1(p.pctChange),
+    // Dual overall trend
     threeMonthTrend: p.threeMonthTrend,
     twelveMonthTrend: p.twelveMonthTrend,
     trendSymbol,        // Unicode: for web display

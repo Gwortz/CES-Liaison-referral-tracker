@@ -160,22 +160,36 @@ function renderTrailingForecast(doc, analysis) {
   doc.moveDown(1);
 }
 
-function providerLine(p) {
-  // "3mo X.X | 12mo Y.Y | prior-yr Z.Z for Oct-Dec 2024 | abs +N | trend ^^"
-  const segs = [
-    `3mo ${avg(p.last3Avg)}`,
-    `12mo ${avg(p.twelveMoAvg)}`,
-  ];
+function providerLines(p) {
+  // Returns an array of strings — rendered as two lines in the PDF.
+  // Every number is a monthly average in eyes/month.
+  const d3 = p.delta3 == null ? '' : ` (${signedDec(p.delta3)} vs prev 3-mo ${avg(p.prev3Avg)}${p.prev3PeriodLabel ? ', ' + p.prev3PeriodLabel : ''}) ${p.delta3SymbolAscii || ''}`;
+  const d12 = p.delta12 == null ? '' : ` (${signedDec(p.delta12)} vs prev 12-mo ${avg(p.prev12Avg)}${p.prev12PeriodLabel ? ', ' + p.prev12PeriodLabel : ''}) ${p.delta12SymbolAscii || ''}`;
+
+  const line1 =
+    `3-mo monthly avg: ${avg(p.last3Avg)} eyes/mo${d3.trim() ? d3 : ''}` +
+    `  |  12-mo monthly avg: ${avg(p.twelveMoAvg)} eyes/mo${d12.trim() ? d12 : ''}`;
+
+  const line2parts = [];
   if (p.priorAvg != null) {
-    segs.push(`prior-yr ${avg(p.priorAvg)} for ${p.priorPeriodLabel}`);
+    line2parts.push(
+      `Prior-year 3-mo monthly avg: ${avg(p.priorAvg)} eyes/mo (${p.priorPeriodLabel})`
+    );
   } else {
-    segs.push('No prior year data');
+    line2parts.push('No prior-year data');
   }
   if (p.absoluteChange != null) {
-    segs.push(`abs ${signed(p.absoluteChange)} eyes`);
+    line2parts.push(`abs change ${signed(p.absoluteChange)} eyes`);
   }
-  segs.push(`trend ${p.trendSymbolAscii || p.arrow}`);
-  return segs.join(' | ');
+  line2parts.push(`overall trend (3-mo/12-mo): ${p.trendSymbolAscii || p.arrow}`);
+
+  return [line1, line2parts.join('  |  ')];
+}
+
+function signedDec(n) {
+  if (n == null) return '--';
+  const s = n > 0 ? '+' : '';
+  return `${s}${n.toFixed(1)}`;
 }
 
 function renderSWOT(doc, analysis) {
@@ -228,11 +242,10 @@ function renderSWOT(doc, analysis) {
         .fillColor(COLORS.text)
         .fontSize(10)
         .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`, x + 8);
-      doc
-        .font('Helvetica')
-        .fontSize(8.5)
-        .fillColor(COLORS.muted)
-        .text(providerLine(p), x + 8);
+      doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.muted);
+      for (const line of providerLines(p)) {
+        doc.text(line, x + 8);
+      }
       doc.moveDown(0.15);
     });
     doc.moveDown(0.4);
@@ -276,11 +289,10 @@ function renderActionReport(doc, analysis) {
           .fillColor(COLORS.text)
           .fontSize(10)
           .text(`${p.provider}  ${p.trendSymbolAscii || p.arrow}`);
-        doc
-          .font('Helvetica')
-          .fontSize(9)
-          .fillColor(COLORS.muted)
-          .text(providerLine(p));
+        doc.font('Helvetica').fontSize(9).fillColor(COLORS.muted);
+        for (const line of providerLines(p)) {
+          doc.text(line);
+        }
         doc
           .font('Helvetica-Oblique')
           .fontSize(9)

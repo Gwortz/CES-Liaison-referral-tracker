@@ -298,34 +298,59 @@ const COLOR_CLASSES = {
   },
 };
 
+function signedDec(n) {
+  if (n == null) return '—';
+  const s = n > 0 ? '+' : '';
+  return `${s}${Number(n).toFixed(1)}`;
+}
+
 function ProviderMetaLine({ p }) {
-  const parts = [
-    <span key="a">3mo <b>{avg(p.last3Avg)}</b></span>,
-    <span key="b">12mo <b>{avg(p.twelveMoAvg)}</b></span>,
-  ];
-  if (p.priorAvg != null) {
-    parts.push(
-      <span key="c">
-        prior-yr <b>{avg(p.priorAvg)}</b> for {p.priorPeriodLabel}
-      </span>
-    );
-  } else {
-    parts.push(<span key="c" className="italic">No prior year data</span>);
-  }
-  if (p.absoluteChange != null) {
-    parts.push(<span key="d">abs <b>{signed(p.absoluteChange)}</b> eyes</span>);
-  }
-  parts.push(
-    <span key="t">trend <b className="font-mono">{p.trendSymbol || p.arrow}</b></span>
-  );
   return (
-    <div className="text-xs text-slate-600">
-      {parts.map((el, i) => (
-        <span key={i}>
-          {i > 0 ? <span className="mx-1 text-slate-400">·</span> : null}
-          {el}
+    <div className="text-xs text-slate-700 mt-1 space-y-0.5">
+      <div>
+        <span className="text-slate-500">3-mo monthly avg:</span>{' '}
+        <b>{avg(p.last3Avg)}</b> eyes/mo
+        {p.prev3Avg != null && (
+          <span className="text-slate-500">
+            {' '}(<span className="font-mono">{p.delta3Symbol}</span>{' '}
+            {signedDec(p.delta3)} vs prev 3-mo <b>{avg(p.prev3Avg)}</b>
+            {p.prev3PeriodLabel ? `, ${p.prev3PeriodLabel}` : ''})
+          </span>
+        )}
+        <span className="mx-2 text-slate-300">|</span>
+        <span className="text-slate-500">12-mo monthly avg:</span>{' '}
+        <b>{avg(p.twelveMoAvg)}</b> eyes/mo
+        {p.prev12Avg != null && (
+          <span className="text-slate-500">
+            {' '}(<span className="font-mono">{p.delta12Symbol}</span>{' '}
+            {signedDec(p.delta12)} vs prev 12-mo <b>{avg(p.prev12Avg)}</b>
+            {p.prev12PeriodLabel ? `, ${p.prev12PeriodLabel}` : ''})
+          </span>
+        )}
+      </div>
+      <div>
+        {p.priorAvg != null ? (
+          <span>
+            <span className="text-slate-500">Prior-year 3-mo monthly avg:</span>{' '}
+            <b>{avg(p.priorAvg)}</b> eyes/mo ({p.priorPeriodLabel})
+          </span>
+        ) : (
+          <span className="italic text-slate-500">No prior-year data</span>
+        )}
+        {p.absoluteChange != null && (
+          <>
+            <span className="mx-2 text-slate-300">|</span>
+            <span>
+              abs change <b>{signed(p.absoluteChange)}</b> eyes
+            </span>
+          </>
+        )}
+        <span className="mx-2 text-slate-300">|</span>
+        <span>
+          overall trend (3-mo/12-mo):{' '}
+          <b className="font-mono">{p.trendSymbol || p.arrow}</b>
         </span>
-      ))}
+      </div>
     </div>
   );
 }
