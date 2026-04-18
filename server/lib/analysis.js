@@ -240,6 +240,44 @@ export function analyze(entries) {
   const sameMonthPriorYearTotal = monthTotal(entries, ry - 1, rm);
   const activeProvidersThisMonth = providersInMonth(entries, ry, rm);
 
+  // Trailing 3 months (ending on reportMonth)
+  let last3MonthsTotal = 0;
+  let priorYear3MonthsTotal = 0;
+  for (let i = 0; i < 3; i++) {
+    const cur = fromMonthKey(monthKey(ry, rm) - i);
+    last3MonthsTotal += monthTotal(entries, cur.year, cur.month);
+    priorYear3MonthsTotal += monthTotal(entries, cur.year - 1, cur.month);
+  }
+
+  // Year-to-date total for the report year
+  let ytdTotal = 0;
+  for (let m = 1; m <= rm; m++) ytdTotal += monthTotal(entries, ry, m);
+
+  // Prior-year same-period + prior-year full total (for seasonal scaling)
+  let priorYearSamePeriodTotal = 0;
+  for (let m = 1; m <= rm; m++)
+    priorYearSamePeriodTotal += monthTotal(entries, ry - 1, m);
+  let priorYearFullTotal = 0;
+  for (let m = 1; m <= 12; m++)
+    priorYearFullTotal += monthTotal(entries, ry - 1, m);
+
+  let predictedAnnualTotal;
+  let predictionMethod;
+  if (rm >= 12) {
+    predictedAnnualTotal = ytdTotal;
+    predictionMethod = 'actual (full year present)';
+  } else if (priorYearSamePeriodTotal > 0 && priorYearFullTotal > 0) {
+    // Seasonal scaling: project using prior-year seasonality
+    predictedAnnualTotal = Math.round(
+      (ytdTotal * priorYearFullTotal) / priorYearSamePeriodTotal
+    );
+    predictionMethod = 'seasonally adjusted from prior year';
+  } else {
+    // Simple linear extrapolation
+    predictedAnnualTotal = Math.round((ytdTotal * 12) / rm);
+    predictionMethod = 'linear extrapolation';
+  }
+
   const momPct =
     lastMonthTotal > 0
       ? ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100
@@ -331,6 +369,11 @@ export function analyze(entries) {
       activeProvidersThisMonth,
       qualifyingCount: qualifying.size,
       overallTrend,
+      last3MonthsTotal: Math.round(last3MonthsTotal),
+      priorYear3MonthsTotal: Math.round(priorYear3MonthsTotal),
+      ytdTotal: Math.round(ytdTotal),
+      predictedAnnualTotal: Math.round(predictedAnnualTotal),
+      predictionMethod,
     },
     swot: {
       strengths: strengths.map(enrich),

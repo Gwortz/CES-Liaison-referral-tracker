@@ -103,6 +103,10 @@ export default function ReportPreview() {
         <p className="mt-3 text-slate-600 italic">{analysis.summary.overallTrend}</p>
       </Section>
 
+      <Section title="Trailing & Forecast">
+        <TrailingForecast summary={analysis.summary} />
+      </Section>
+
       <Section title="SWOT Analysis">
         <div className="grid md:grid-cols-2 gap-4">
           <Quadrant label="Strengths" color="emerald" items={analysis.swot.strengths} />
@@ -142,6 +146,57 @@ function Section({ title, children }) {
       </h2>
       {children}
     </section>
+  );
+}
+
+function TrailingForecast({ summary }) {
+  const last3 = summary.last3MonthsTotal ?? 0;
+  const prior3 = summary.priorYear3MonthsTotal ?? 0;
+  const ytd = summary.ytdTotal ?? 0;
+  const predicted = summary.predictedAnnualTotal ?? 0;
+  const method = summary.predictionMethod || '';
+
+  const trailingDelta =
+    prior3 > 0 ? ((last3 - prior3) / prior3) * 100 : null;
+
+  const cards = [
+    {
+      label: 'Referrals, last 3 months',
+      value: whole(last3),
+      sub: `trailing through report month`,
+    },
+    {
+      label: 'Same 3 months, prior year',
+      value: whole(prior3),
+      sub:
+        trailingDelta != null
+          ? `${pct(trailingDelta)} vs last 3 months`
+          : 'no prior-year data',
+    },
+    {
+      label: 'Year-to-date referrals',
+      value: whole(ytd),
+      sub: 'Jan through report month',
+    },
+    {
+      label: 'Predicted annual total',
+      value: whole(predicted),
+      sub: method,
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {cards.map((c) => (
+        <div key={c.label} className="bg-white border border-slate-200 rounded-lg p-3">
+          <div className="text-xs uppercase tracking-wide text-slate-500">
+            {c.label}
+          </div>
+          <div className="text-2xl font-semibold text-slate-800">{c.value}</div>
+          <div className="text-xs text-slate-500 mt-0.5">{c.sub}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 

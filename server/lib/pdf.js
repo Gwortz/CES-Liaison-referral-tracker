@@ -52,6 +52,7 @@ export function generateReport({ market, analysis }) {
 
       renderHeader(doc, market, analysis);
       renderExecutiveSummary(doc, analysis);
+      renderTrailingForecast(doc, analysis);
       renderSWOT(doc, analysis);
       renderActionReport(doc, analysis);
       renderFooter(doc);
@@ -116,6 +117,40 @@ function renderExecutiveSummary(doc, analysis) {
     .fontSize(10)
     .text(s.overallTrend, { align: 'left' });
 
+  doc.moveDown(1);
+}
+
+function renderTrailingForecast(doc, analysis) {
+  sectionTitle(doc, 'Trailing & Forecast');
+  const s = analysis.summary;
+  const last3 = s.last3MonthsTotal ?? 0;
+  const prior3 = s.priorYear3MonthsTotal ?? 0;
+  const trailingDelta =
+    prior3 > 0 ? ((last3 - prior3) / prior3) * 100 : null;
+
+  const rows = [
+    ['Referrals, last 3 months', fmt(last3)],
+    [
+      'Same 3 months, prior year',
+      trailingDelta != null
+        ? `${fmt(prior3)}  (${pct(trailingDelta)} vs last 3 months)`
+        : `${fmt(prior3)}  (no prior-year data)`,
+    ],
+    ['Year-to-date referrals (Jan through report month)', fmt(s.ytdTotal ?? 0)],
+    [
+      'Predicted annual total',
+      `${fmt(s.predictedAnnualTotal ?? 0)}  (${s.predictionMethod || 'n/a'})`,
+    ],
+  ];
+
+  doc.font('Helvetica').fontSize(10).fillColor(COLORS.text);
+  rows.forEach(([k, v]) => {
+    doc
+      .text(`${k}: `, { continued: true })
+      .font('Helvetica-Bold')
+      .text(v)
+      .font('Helvetica');
+  });
   doc.moveDown(1);
 }
 
