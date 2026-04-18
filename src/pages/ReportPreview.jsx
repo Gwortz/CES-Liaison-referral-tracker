@@ -104,6 +104,10 @@ export default function ReportPreview() {
         </div>
       )}
 
+      <Section title="Legend — How to read each provider entry">
+        <Legend />
+      </Section>
+
       <Section title="Executive Summary">
         <SummaryGrid summary={analysis.summary} />
         <p className="mt-3 text-slate-700">
@@ -114,21 +118,17 @@ export default function ReportPreview() {
             {analysis.summary.contradictingTrendsNote}
           </div>
         )}
+        <TopThreePerCategory swot={analysis.swot} />
       </Section>
 
       <Section title="Trailing & Forecast">
         <TrailingForecast summary={analysis.summary} />
       </Section>
 
-      <Section title="SWOT Analysis">
+      <Section title="SWOT Analysis (top 15 per category)">
         <div className="space-y-4">
           <Category
-            label="Zero Referrals This Month"
-            color="slate"
-            items={analysis.swot.zeroReferrals || []}
-          />
-          <Category
-            label="Strengths (Surging)"
+            label="Strengths (Top volume, stable or growing)"
             color="emerald"
             items={analysis.swot.strengths || []}
           />
@@ -147,19 +147,19 @@ export default function ReportPreview() {
             color="sky"
             items={analysis.swot.opportunities || []}
           />
+          <Category
+            label="Zero Referrals This Month"
+            color="slate"
+            items={analysis.swot.zeroReferrals || []}
+          />
         </div>
       </Section>
 
-      <Section title="Monthly Action Report">
+      <Section title="Monthly Action Report (top 15 per list)">
         <ActionList
           title="Call List — Threats (personal visit or call this week)"
           color="red"
           items={analysis.action.callList}
-        />
-        <ActionList
-          title="Zero Referrals List (reach out personally)"
-          color="slate"
-          items={analysis.action.zeroList || []}
         />
         <ActionList
           title="Watch List — Weaknesses (monitor next month)"
@@ -176,7 +176,58 @@ export default function ReportPreview() {
           color="emerald"
           items={analysis.action.thankList}
         />
+        <ActionList
+          title="Zero Referrals List (reach out personally)"
+          color="slate"
+          items={analysis.action.zeroList || []}
+        />
       </Section>
+    </div>
+  );
+}
+
+function Legend() {
+  const items = [
+    ['3-mo monthly avg', 'Average referrals per month over the most recent 3 months (ending in the report month).'],
+    ['prev 3-mo', 'The 3 months immediately before that window, for short-term trend comparison. Shows the delta and direction (UP/STABLE/DOWN).'],
+    ['12-mo monthly avg', 'Average referrals per month over the most recent 12 months, excluding any months the provider sent zero referrals.'],
+    ['prev 12-mo', 'The 12 months immediately before that window, for longer-term trend comparison.'],
+    ['prior-year 3-mo monthly avg', 'Average referrals per month for the same 3 months one year earlier, for year-over-year context.'],
+    ['abs change', 'Whole-eye total difference between the current 3-month total and the prior-year same-3-month total (not a monthly average).'],
+    ['overall trend [3-mo/12-mo]', 'Combined direction at both resolutions. Each is UP (rose materially), STABLE (within the noise band), or DOWN.'],
+    ['Tier', 'Volume tier: HIGH (12-mo avg ≥ 15 eyes/mo), MEDIUM (8–14), STANDARD (4–7), LOW (<4). Higher tiers use larger thresholds before a change is flagged.'],
+  ];
+  return (
+    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+      {items.map(([term, def]) => (
+        <div key={term} className="leading-snug">
+          <dt className="inline font-semibold text-slate-800">{term}:</dt>{' '}
+          <dd className="inline text-slate-600">{def}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function TopThreePerCategory({ swot }) {
+  const top3 = (list) =>
+    (list || []).slice(0, 3).map((p) => displayName(p.provider)).join(', ') ||
+    'none';
+  const rows = [
+    ['Top 3 Strengths', top3(swot.strengths), 'text-emerald-700'],
+    ['Top 3 Threats', top3(swot.threats), 'text-red-700'],
+    ['Top 3 Weaknesses', top3(swot.weaknesses), 'text-amber-700'],
+    ['Top 3 Opportunities', top3(swot.opportunities), 'text-sky-700'],
+    ['Top 3 Zero Referrals', top3(swot.zeroReferrals), 'text-slate-700'],
+  ];
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1 text-sm">
+      {rows.map(([label, names, color]) => (
+        <div key={label}>
+          <span className={`font-semibold ${color}`}>{label}:</span>{' '}
+          <span className="text-slate-800">{names}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -366,14 +417,20 @@ function ProviderMetaLine({ p }) {
 
 function Category({ label, color, items }) {
   const c = COLOR_CLASSES[color];
+  const MAX = 15;
+  const shown = (items || []).slice(0, MAX);
+  const countLabel =
+    (items || []).length > shown.length
+      ? `top ${shown.length} of ${items.length}`
+      : `${(items || []).length}`;
   return (
     <div className={`rounded-lg border ${c.border} overflow-hidden`}>
       <div className={`${c.header} text-white font-semibold px-3 py-1.5 text-sm`}>
-        {label} ({items.length})
+        {label} ({countLabel})
       </div>
       <div className={`${c.tint} p-3 space-y-2`}>
-        {!items.length && <p className="text-slate-500 text-sm">None this month.</p>}
-        {items.map((p) => (
+        {!shown.length && <p className="text-slate-500 text-sm">None this month.</p>}
+        {shown.map((p) => (
           <div key={p.provider} className="bg-white rounded-md border border-slate-200 p-2">
             <div className="font-medium text-slate-800">
               {displayName(p.provider)}{' '}
@@ -392,17 +449,23 @@ function Category({ label, color, items }) {
 
 function ActionList({ title, color, items }) {
   const c = COLOR_CLASSES[color];
+  const MAX = 15;
+  const shown = (items || []).slice(0, MAX);
+  const countLabel =
+    (items || []).length > shown.length
+      ? `top ${shown.length} of ${items.length}`
+      : `${(items || []).length}`;
   return (
     <div className="mb-5">
       <h3 className="font-semibold mb-2 text-slate-800">
         <span
           className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${c.dot}`}
         ></span>
-        {title} ({items.length})
+        {title} ({countLabel})
       </h3>
-      {!items.length && <p className="text-slate-500 text-sm">None this month.</p>}
+      {!shown.length && <p className="text-slate-500 text-sm">None this month.</p>}
       <div className="space-y-2">
-        {items.map((p) => (
+        {shown.map((p) => (
           <div
             key={p.provider}
             className="bg-white rounded-md border border-slate-200 p-3"

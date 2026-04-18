@@ -59,6 +59,7 @@ export function generateReport({ market, analysis }) {
       doc.on('error', reject);
 
       renderHeader(doc, market, analysis);
+      renderLegend(doc);
       renderExecutiveSummary(doc, analysis);
       renderTrailingForecast(doc, analysis);
       renderSWOT(doc, analysis);
@@ -136,7 +137,65 @@ function renderExecutiveSummary(doc, analysis) {
       .text(s.contradictingTrendsNote, { align: 'left' });
   }
 
+  // Top 3 per category
+  renderTopThreePerCategory(doc, analysis);
+
   doc.moveDown(1);
+}
+
+function renderTopThreePerCategory(doc, analysis) {
+  const swot = analysis.swot || {};
+  const top3 = (list) =>
+    (list || [])
+      .slice(0, 3)
+      .map((p) => displayName(p.provider))
+      .join(', ') || 'none';
+
+  const rows = [
+    ['Top 3 Strengths', top3(swot.strengths), COLORS.strength],
+    ['Top 3 Threats', top3(swot.threats), COLORS.threat],
+    ['Top 3 Weaknesses', top3(swot.weaknesses), COLORS.weakness],
+    ['Top 3 Opportunities', top3(swot.opportunities), COLORS.opportunity],
+    ['Top 3 Zero Referrals', top3(swot.zeroReferrals), COLORS.zero],
+  ];
+
+  doc.moveDown(0.4);
+  rows.forEach(([label, names, color]) => {
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .fillColor(color)
+      .text(`${label}: `, { continued: true })
+      .font('Helvetica')
+      .fillColor(COLORS.text)
+      .text(names);
+  });
+}
+
+function renderLegend(doc) {
+  sectionTitle(doc, 'Legend — How to read each provider entry');
+
+  const items = [
+    ['3-mo monthly avg', 'Average referrals per month over the most recent 3 months (ending in the report month).'],
+    ['prev 3-mo', 'The 3 months immediately before that window, for short-term trend comparison. Shows the delta and direction (UP/STABLE/DOWN).'],
+    ['12-mo monthly avg', 'Average referrals per month over the most recent 12 months, excluding any months the provider sent zero referrals.'],
+    ['prev 12-mo', 'The 12 months immediately before that window, for longer-term trend comparison.'],
+    ['prior-year 3-mo monthly avg', 'Average referrals per month for the same 3 months one year earlier, for year-over-year context.'],
+    ['abs change', 'Whole-eye total difference between the current 3-month total and the prior-year same-3-month total (not a monthly average).'],
+    ['overall trend [3-mo/12-mo]', 'Combined direction at both resolutions. Each is UP (rose materially), STABLE (within the noise band), or DOWN.'],
+    ['Tier', 'Volume tier: HIGH (12-mo avg >= 15 eyes/mo), MEDIUM (8-14), STANDARD (4-7), LOW (<4). Higher tiers use larger thresholds before a change is flagged.'],
+  ];
+
+  doc.font('Helvetica').fontSize(9).fillColor(COLORS.text);
+  items.forEach(([term, def]) => {
+    doc
+      .font('Helvetica-Bold')
+      .text(`${term}: `, { continued: true })
+      .font('Helvetica')
+      .text(def);
+  });
+
+  doc.moveDown(0.8);
 }
 
 function renderTrailingForecast(doc, analysis) {
@@ -209,13 +268,40 @@ function renderSWOT(doc, analysis) {
   sectionTitle(doc, 'SWOT Analysis');
 
   const swot = analysis.swot;
-  // Render in priority order: Zero Referrals, Strengths, Threats, Weaknesses, Opportunities
+  const MAX = 15;
+  // Strengths/Threats/Weaknesses/Opportunities first (capped at top 15 by the
+  // strongest trend within each category), Zero Referrals last.
   const sections = [
-    { label: 'Zero Referrals This Month', color: COLORS.zero, items: swot.zeroReferrals || [] },
-    { label: 'Strengths (Surging)', color: COLORS.strength, items: swot.strengths || [] },
-    { label: 'Threats (Material Decline)', color: COLORS.threat, items: swot.threats || [] },
-    { label: 'Weaknesses (Softening)', color: COLORS.weakness, items: swot.weaknesses || [] },
-    { label: 'Opportunities (Emerging)', color: COLORS.opportunity, items: swot.opportunities || [] },
+    {
+      label: 'Strengths (Top volume, stable or growing)',
+      color: COLORS.strength,
+      items: (swot.strengths || []).slice(0, MAX),
+      total: (swot.strengths || []).length,
+    },
+    {
+      label: 'Threats (Material decline)',
+      color: COLORS.threat,
+      items: (swot.threats || []).slice(0, MAX),
+      total: (swot.threats || []).length,
+    },
+    {
+      label: 'Weaknesses (Softening)',
+      color: COLORS.weakness,
+      items: (swot.weaknesses || []).slice(0, MAX),
+      total: (swot.weaknesses || []).length,
+    },
+    {
+      label: 'Opportunities (Emerging)',
+      color: COLORS.opportunity,
+      items: (swot.opportunities || []).slice(0, MAX),
+      total: (swot.opportunities || []).length,
+    },
+    {
+      label: 'Zero Referrals This Month',
+      color: COLORS.zero,
+      items: (swot.zeroReferrals || []).slice(0, MAX),
+      total: (swot.zeroReferrals || []).length,
+    },
   ];
 
   const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -227,11 +313,14 @@ function renderSWOT(doc, analysis) {
 
     doc.save();
     doc.rect(x, y, pageWidth, 16).fill(q.color);
+    const total = q.total ?? q.items.length;
+    const shown = q.items.length;
+    const countLabel = total > shown ? `(top ${shown} of ${total})` : `(${total})`;
     doc
       .fillColor('#fff')
       .font('Helvetica-Bold')
       .fontSize(11)
-      .text(`${q.label} (${q.items.length})`, x + 8, y + 3, {
+      .text(`${q.label} ${countLabel}`, x + 8, y + 3, {
         width: pageWidth - 16,
       });
     doc.restore();
@@ -269,22 +358,28 @@ function renderActionReport(doc, analysis) {
   if (doc.y > doc.page.height - 200) doc.addPage();
   sectionTitle(doc, 'Monthly Action Report');
 
-  const lists = [
-    { title: 'Call List (Threats -- personal visit or call this week)', color: COLORS.threat, items: analysis.action.callList },
-    { title: 'Zero Referrals List (reach out personally)', color: COLORS.zero, items: analysis.action.zeroList || [] },
-    { title: 'Watch List (Weaknesses -- monitor next month)', color: COLORS.weakness, items: analysis.action.watchList },
-    { title: 'Welcome List (Opportunities -- reach out and encourage)', color: COLORS.opportunity, items: analysis.action.welcomeList },
-    { title: 'Thank List (Strengths -- keep the relationship warm)', color: COLORS.strength, items: analysis.action.thankList },
+  const MAX = 15;
+  const cap = (arr) => (arr || []).slice(0, MAX);
+  const rawLists = [
+    { title: 'Call List (Threats -- personal visit or call this week)', color: COLORS.threat, items: cap(analysis.action.callList), total: (analysis.action.callList || []).length },
+    { title: 'Watch List (Weaknesses -- monitor next month)', color: COLORS.weakness, items: cap(analysis.action.watchList), total: (analysis.action.watchList || []).length },
+    { title: 'Welcome List (Opportunities -- reach out and encourage)', color: COLORS.opportunity, items: cap(analysis.action.welcomeList), total: (analysis.action.welcomeList || []).length },
+    { title: 'Thank List (Strengths -- keep the relationship warm)', color: COLORS.strength, items: cap(analysis.action.thankList), total: (analysis.action.thankList || []).length },
+    { title: 'Zero Referrals List (reach out personally)', color: COLORS.zero, items: cap(analysis.action.zeroList), total: (analysis.action.zeroList || []).length },
   ];
 
-  lists.forEach((list) => {
+  rawLists.forEach((list) => {
     if (doc.y > doc.page.height - doc.page.margins.bottom - 80) doc.addPage();
 
+    const countSuffix =
+      list.total > list.items.length
+        ? ` (top ${list.items.length} of ${list.total})`
+        : ` (${list.total})`;
     doc
       .font('Helvetica-Bold')
       .fillColor(list.color)
       .fontSize(11)
-      .text(list.title);
+      .text(`${list.title}${countSuffix}`);
 
     doc.moveDown(0.2);
 
