@@ -391,14 +391,27 @@ export function analyze(entries) {
     }
 
     // 4) Weaknesses — softening, below 12mo baseline or declining trend.
-    //    Excludes seasonal dips: if priorAvg < twelveMoAvg (seasonal low),
-    //    only flag when (priorAvg - last3Avg) >= tier.threshold.
+    //    Seasonal-low override: when the prior-year same 3-mo window was
+    //    seasonally low (below the 12-mo baseline), a current drop vs the
+    //    12-mo baseline may simply be the same seasonal pattern repeating.
+    //    In that case only, we demand a real drop vs the prior-year seasonal
+    //    norm before calling it a weakness.
+    //    We ONLY relax the `belowBaseline` trigger this way. A genuine 3-mo
+    //    or 12-mo declining trend is a real signal and must never be
+    //    explained away by a weak prior year (e.g. Kevin Stallard: 3-mo avg
+    //    fell from 19 to 13.3 eyes/mo with a [13, 20, 7] declining window;
+    //    his prior-year Jan-Mar being slightly below baseline should not
+    //    silence that).
     const belowBaseline = (p.twelveMoAvg - p.last3Avg) >= p.tier.threshold;
     const trendingDown =
       p.threeMonthTrend === 'declining' || p.twelveMonthTrend === 'declining';
     let isWeakness = belowBaseline || trendingDown;
-    if (isWeakness && p.priorAvg != null && p.priorAvg < p.twelveMoAvg) {
-      // Seasonal low — require a real drop vs prior-year seasonal norm
+    if (
+      isWeakness &&
+      !trendingDown &&
+      p.priorAvg != null &&
+      p.priorAvg < p.twelveMoAvg
+    ) {
       isWeakness = (p.priorAvg - p.last3Avg) >= p.tier.threshold;
     }
     if (isWeakness) {
