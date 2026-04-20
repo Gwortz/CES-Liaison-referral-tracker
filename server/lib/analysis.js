@@ -367,12 +367,22 @@ export function analyze(entries) {
     }
 
     // 2) Strengths — top-15 by total historical volume, non-declining at
-    //    both resolutions, and still producing meaningful volume (>=5/mo).
+    //    both resolutions, still producing meaningful volume (>=5/mo), AND
+    //    not materially below the same 3-mo period last year. The last gate
+    //    keeps "Thank" sincere: a provider who eroded in a prior year and
+    //    has plateaued at a lower level (e.g. 3-mo 5.3 vs prior-year 9.7,
+    //    abs change -13) looks flat inside the current 12-mo window but is
+    //    really a Call-List candidate, not a Thank-List one. Noise tolerance
+    //    comes from the tier threshold -- a -1 or -2 eyes drop on a medium
+    //    tier is still fine; a -13 is not.
+    const priorYearMaterialDrop =
+      p.priorAvg != null && (p.priorAvg - p.last3Avg) >= p.tier.threshold;
     const isStrength =
       top15.has(p.provider) &&
       p.threeMonthTrend !== 'declining' &&
       p.twelveMonthTrend !== 'declining' &&
-      p.last3Avg >= 5;
+      p.last3Avg >= 5 &&
+      !priorYearMaterialDrop;
     if (isStrength) {
       strengths.push(p);
       continue;
