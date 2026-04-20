@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 
-const MARKETS = ['Lexington', 'Louisville'];
+const MARKETS = ['East', 'West'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [market, setMarket] = useState('Lexington');
+  const [market, setMarket] = useState('East');
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);

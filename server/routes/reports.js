@@ -11,7 +11,11 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
-const MARKETS = ['Lexington', 'Louisville'];
+// Markets are labeled East / West in the UI. The master spreadsheet stores
+// each referrer's market in a "Territory" column as EAST / WEST, so we map
+// the user-facing label to that territory value.
+const MARKETS = ['East', 'West'];
+const MARKET_TO_TERRITORY = { East: 'EAST', West: 'WEST' };
 
 router.post('/analyze', requireAuth, upload.single('file'), (req, res) => {
   try {
@@ -20,11 +24,14 @@ router.post('/analyze', requireAuth, upload.single('file'), (req, res) => {
       return res.status(400).json({ error: 'Invalid market' });
     }
     if (!req.file) return res.status(400).json({ error: 'Excel file required' });
-    const entries = coalesceEntries(parseWorkbook(req.file.buffer));
+    const territory = MARKET_TO_TERRITORY[market];
+    const entries = coalesceEntries(
+      parseWorkbook(req.file.buffer, { territory })
+    );
     if (!entries.length) {
       return res.status(400).json({
         error:
-          'No valid entries found in the uploaded file. Make sure month headers include month + year and that provider/eyes columns are paired.',
+          'No valid entries found for the selected market. Make sure the workbook has the East/West Territory column, or that month headers include month + year.',
       });
     }
     const result = analyze(entries);
