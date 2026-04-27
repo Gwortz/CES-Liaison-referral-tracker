@@ -69,6 +69,11 @@ function isExcludedName(name) {
   return false;
 }
 
+const SHORT_MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+];
+
 function parseMonthHeader(headerText, fallbackYear) {
   if (!headerText || typeof headerText !== 'string') return null;
   const text = headerText.toLowerCase();
@@ -78,6 +83,30 @@ function parseMonthHeader(headerText, fallbackYear) {
   const year = yearMatch ? parseInt(yearMatch[0], 10) : fallbackYear;
   if (!year) return null;
   return { year, month: monthIdx + 1 }; // 1-indexed month
+}
+
+/**
+ * Parse a matrix-style month header like "Jan-22", "Jan 2022", "January 2022".
+ * Two-digit years are interpreted as 1900s for >= 70 and 2000s otherwise.
+ */
+function parseMatrixMonthHeader(headerText) {
+  if (headerText == null) return null;
+  const text = String(headerText).trim().toLowerCase();
+  if (!text) return null;
+  let monthIdx = MONTH_NAMES.findIndex((m) => text.startsWith(m));
+  if (monthIdx === -1) monthIdx = SHORT_MONTHS.findIndex((m) => text.startsWith(m));
+  if (monthIdx === -1) return null;
+  const fourDigit = text.match(/(19|20)\d{2}/);
+  let year;
+  if (fourDigit) {
+    year = parseInt(fourDigit[0], 10);
+  } else {
+    const twoDigit = text.match(/[-\s/](\d{2})\b/);
+    if (!twoDigit) return null;
+    const yy = parseInt(twoDigit[1], 10);
+    year = yy >= 70 ? 1900 + yy : 2000 + yy;
+  }
+  return { year, month: monthIdx + 1 };
 }
 
 function monthNameToNumber(text) {
@@ -98,6 +127,18 @@ function monthNameToNumber(text) {
 function normalizeTerritory(v) {
   if (v == null) return '';
   return String(v).trim().toUpperCase();
+}
+
+/**
+ * Match a row's raw Territory value against the requested filter.
+ * Per user rule: blank/missing Territory defaults to EAST. Any other
+ * non-EAST/WEST value (e.g. "TBD") matches neither market.
+ */
+function matchesTerritory(rawTerr, filter) {
+  const terr = normalizeTerritory(rawTerr);
+  if (filter === 'EAST') return terr === 'EAST' || terr === '';
+  if (filter === 'WEST') return terr === 'WEST';
+  return true;
 }
 
 /**
@@ -150,8 +191,7 @@ function parseLongForm(parsed, territoryFilter) {
     if (isExcludedName(rawName)) continue;
 
     if (filter && territoryCol !== -1) {
-      const terr = normalizeTerritory(row[territoryCol]);
-      if (terr !== filter) continue;
+      if (!matchesTerritory(row[territoryCol], filter)) continue;
     }
 
     const month = monthNameToNumber(row[monthCol]);
@@ -169,6 +209,85 @@ function parseLongForm(parsed, territoryFilter) {
     if (!display) continue;
 
     entries.push({ year, month, provider: display, eyes });
+  }
+  return entries;
+}
+
+/**
+ * Detect a "matrix" layout sheet: one row per provider, one column per month
+ * holding eye counts. Header row contains a "Referrer" column, optionally a
+ * "Territory" column, and month columns like "Jan-22" / "January 2022".
+ * Tolerates a banner row above the real header (row 0 banner, row 1 header).
+ */
+function findMatrixSheet(wb) {
+  for (const sn of wb.SheetNames) {
+    const sheet = wb.Sheets[sn];
+    if (!sheet) continue;
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: null,
+      blankrows: false,
+      range: 0,
+    });
+    if (rows.length < 2) continue;
+
+    for (const headerRowIdx of [0, 1]) {
+      const headerRow = rows[headerRowIdx];
+      if (!headerRow) continue;
+      const lower = headerRow.map((h) =>
+        h == null ? '' : String(h).trim().toLowerCase()
+      );
+      const referrerCol = lower.indexOf('referrer');
+      if (referrerCol === -1) continue;
+      const territoryCol = lower.indexOf('territory');
+
+      const monthColumns = [];
+      for (let c = 0; c < headerRow.length; c++) {
+        const info = parseMatrixMonthHeader(headerRow[c]);
+        if (info) monthColumns.push({ col: c, ...info });
+      }
+      if (monthColumns.length >= 2) {
+        return {
+          sheetName: sn,
+          rows,
+          headerRowIdx,
+          referrerCol,
+          territoryCol,
+          monthColumns,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse the matrix layout.
+ * @param {object} parsed result from findMatrixSheet
+ * @param {string|null} territoryFilter - 'EAST' / 'WEST' or null to keep all rows.
+ */
+function parseMatrixForm(parsed, territoryFilter) {
+  const { rows, headerRowIdx, referrerCol, territoryCol, monthColumns } = parsed;
+  const filter = territoryFilter ? normalizeTerritory(territoryFilter) : null;
+  const entries = [];
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const rawName = row[referrerCol];
+    if (isExcludedName(rawName)) continue;
+
+    if (filter && territoryCol !== -1) {
+      if (!matchesTerritory(row[territoryCol], filter)) continue;
+    }
+
+    const titleCased = toTitleCase(String(rawName));
+    const display = cleanNameForDisplay(titleCased);
+    if (!display) continue;
+
+    for (const mc of monthColumns) {
+      const eyes = Number(row[mc.col]);
+      if (!Number.isFinite(eyes) || eyes <= 0) continue;
+      entries.push({ year: mc.year, month: mc.month, provider: display, eyes });
+    }
   }
   return entries;
 }
@@ -248,6 +367,12 @@ export function parseWorkbook(buffer, opts = {}) {
   if (longForm) {
     return parseLongForm(longForm, territoryFilter);
   }
+
+  const matrix = findMatrixSheet(wb);
+  if (matrix) {
+    return parseMatrixForm(matrix, territoryFilter);
+  }
+
   // Legacy wide format has no territory designation, so we parse everything.
   // A territoryFilter passed in for a legacy file is ignored.
   return parseWideForm(wb);
@@ -261,7 +386,9 @@ export function parseWorkbook(buffer, opts = {}) {
 export function hasTerritoryColumn(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
   const longForm = findLongFormSheet(wb);
-  return !!(longForm && longForm.territoryCol !== -1);
+  if (longForm && longForm.territoryCol !== -1) return true;
+  const matrix = findMatrixSheet(wb);
+  return !!(matrix && matrix.territoryCol !== -1);
 }
 
 /**
