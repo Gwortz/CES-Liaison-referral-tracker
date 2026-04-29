@@ -5,6 +5,19 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+const SWOT_CRITERIA = {
+  strengths:
+    'Top-15 providers by total historical eye volume whose 3-mo monthly avg is at least 5 eyes/mo, with neither the 3-mo nor 12-mo trend declining, and not materially below the same 3-month period last year.',
+  threats:
+    "Material decline: 3-mo monthly avg has dropped vs the prior-year same 3-month period (or vs the 12-mo baseline when no prior-year data) by at least the provider's volume-tier threshold.",
+  weaknesses:
+    "Softening: 3-mo monthly avg is below the 12-mo monthly avg by at least the provider's tier threshold, or either the 3-mo or 12-mo trend is declining. A seasonal-low override prevents flagging when last year's same 3 months were already a seasonal trough.",
+  opportunities:
+    'Strictly positive movement: either a newly qualifying provider (did not qualify 6 months ago but does now) with a non-declining 3-mo trend, or an improving provider with a positive change vs prior year and no declining trends.',
+  zeroReferrals:
+    'Zero eyes this month, but at least one referral in the trailing 12 months. Recent activity makes the silence notable. Always classified here regardless of other criteria.',
+};
+
 const COLORS = {
   brand: '#0B4D6B',
   accent: '#1E88C4',
@@ -274,30 +287,35 @@ function renderSWOT(doc, analysis) {
   const sections = [
     {
       label: 'Strengths (Top volume, stable or growing)',
+      description: SWOT_CRITERIA.strengths,
       color: COLORS.strength,
       items: (swot.strengths || []).slice(0, MAX),
       total: (swot.strengths || []).length,
     },
     {
       label: 'Threats (Material decline)',
+      description: SWOT_CRITERIA.threats,
       color: COLORS.threat,
       items: (swot.threats || []).slice(0, MAX),
       total: (swot.threats || []).length,
     },
     {
       label: 'Weaknesses (Softening)',
+      description: SWOT_CRITERIA.weaknesses,
       color: COLORS.weakness,
       items: (swot.weaknesses || []).slice(0, MAX),
       total: (swot.weaknesses || []).length,
     },
     {
       label: 'Opportunities (Emerging)',
+      description: SWOT_CRITERIA.opportunities,
       color: COLORS.opportunity,
       items: (swot.opportunities || []).slice(0, MAX),
       total: (swot.opportunities || []).length,
     },
     {
       label: 'Zero Referrals This Month',
+      description: SWOT_CRITERIA.zeroReferrals,
       color: COLORS.zero,
       items: (swot.zeroReferrals || []).slice(0, MAX),
       total: (swot.zeroReferrals || []).length,
@@ -326,6 +344,18 @@ function renderSWOT(doc, analysis) {
     doc.restore();
 
     doc.y = y + 20;
+
+    if (q.description) {
+      doc
+        .font('Helvetica-Oblique')
+        .fontSize(8.5)
+        .fillColor(COLORS.muted)
+        .text(q.description, x + 8, doc.y, {
+          width: pageWidth - 16,
+          align: 'left',
+        });
+      doc.moveDown(0.3);
+    }
 
     if (!q.items.length) {
       doc

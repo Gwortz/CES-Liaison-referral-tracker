@@ -7,6 +7,19 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+const SWOT_CRITERIA = {
+  strengths:
+    'Top-15 providers by total historical eye volume whose 3-mo monthly avg is at least 5 eyes/mo, with neither the 3-mo nor 12-mo trend declining, and not materially below the same 3-month period last year.',
+  threats:
+    "Material decline: 3-mo monthly avg has dropped vs the prior-year same 3-month period (or vs the 12-mo baseline when no prior-year data) by at least the provider's volume-tier threshold.",
+  weaknesses:
+    "Softening: 3-mo monthly avg is below the 12-mo monthly avg by at least the provider's tier threshold, or either the 3-mo or 12-mo trend is declining. A seasonal-low override prevents flagging when last year's same 3 months were already a seasonal trough.",
+  opportunities:
+    'Strictly positive movement: either a newly qualifying provider (did not qualify 6 months ago but does now) with a non-declining 3-mo trend, or an improving provider with a positive change vs prior year and no declining trends.',
+  zeroReferrals:
+    'Zero eyes this month, but at least one referral in the trailing 12 months. Recent activity makes the silence notable. Always classified here regardless of other criteria.',
+};
+
 function pct(n) {
   if (n == null) return '—';
   const s = n > 0 ? '+' : '';
@@ -129,26 +142,31 @@ export default function ReportPreview() {
         <div className="space-y-4">
           <Category
             label="Strengths (Top volume, stable or growing)"
+            description={SWOT_CRITERIA.strengths}
             color="emerald"
             items={analysis.swot.strengths || []}
           />
           <Category
             label="Threats (Material Decline)"
+            description={SWOT_CRITERIA.threats}
             color="red"
             items={analysis.swot.threats || []}
           />
           <Category
             label="Weaknesses (Softening)"
+            description={SWOT_CRITERIA.weaknesses}
             color="amber"
             items={analysis.swot.weaknesses || []}
           />
           <Category
             label="Opportunities (Emerging)"
+            description={SWOT_CRITERIA.opportunities}
             color="sky"
             items={analysis.swot.opportunities || []}
           />
           <Category
             label="Zero Referrals This Month"
+            description={SWOT_CRITERIA.zeroReferrals}
             color="slate"
             items={analysis.swot.zeroReferrals || []}
           />
@@ -415,7 +433,7 @@ function ProviderMetaLine({ p }) {
   );
 }
 
-function Category({ label, color, items }) {
+function Category({ label, description, color, items }) {
   const c = COLOR_CLASSES[color];
   const MAX = 15;
   const shown = (items || []).slice(0, MAX);
@@ -429,6 +447,11 @@ function Category({ label, color, items }) {
         {label} ({countLabel})
       </div>
       <div className={`${c.tint} p-3 space-y-2`}>
+        {description && (
+          <p className="text-xs italic text-slate-600 leading-snug">
+            {description}
+          </p>
+        )}
         {!shown.length && <p className="text-slate-500 text-sm">None this month.</p>}
         {shown.map((p) => (
           <div key={p.provider} className="bg-white rounded-md border border-slate-200 p-2">
