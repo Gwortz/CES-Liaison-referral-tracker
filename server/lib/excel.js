@@ -87,10 +87,23 @@ function parseMonthHeader(headerText, fallbackYear) {
 
 /**
  * Parse a matrix-style month header like "Jan-22", "Jan 2022", "January 2022".
+ * Also handles Excel date serial numbers (e.g. 46138 → Apr 2026) which occur
+ * when a header cell is formatted as a date instead of plain text.
  * Two-digit years are interpreted as 1900s for >= 70 and 2000s otherwise.
  */
 function parseMatrixMonthHeader(headerText) {
   if (headerText == null) return null;
+
+  // Handle Excel date serial numbers (numeric header values)
+  if (typeof headerText === 'number' && headerText > 1 && headerText < 200000) {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + headerText * 86400000);
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + 1;
+    if (y >= 1900 && y <= 2100 && m >= 1 && m <= 12) return { year: y, month: m };
+    return null;
+  }
+
   const text = String(headerText).trim().toLowerCase();
   if (!text) return null;
   let monthIdx = MONTH_NAMES.findIndex((m) => text.startsWith(m));
