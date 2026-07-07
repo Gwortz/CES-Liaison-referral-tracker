@@ -72,6 +72,7 @@ export function generateReport({ market, analysis }) {
       doc.on('error', reject);
 
       renderHeader(doc, market, analysis);
+      renderSignificantMovers(doc, analysis);
       renderLegend(doc);
       renderExecutiveSummary(doc, analysis);
       renderTrailingForecast(doc, analysis);
@@ -183,6 +184,76 @@ function renderTopThreePerCategory(doc, analysis) {
       .fillColor(COLORS.text)
       .text(names);
   });
+}
+
+function sigTag(p) {
+  if (!p.significance) return '';
+  const t = p.significance.tier === 'significant' ? 'SIG' : 'LIKELY';
+  return `  [${t} ${p.significance.direction === 'up' ? 'UP' : 'DOWN'}]`;
+}
+
+function renderSignificantMovers(doc, analysis) {
+  const movers = analysis.significantMovers;
+  if (!movers) return;
+
+  sectionTitle(doc, 'Statistically Significant Movers');
+
+  doc
+    .font('Helvetica-Oblique')
+    .fontSize(8.5)
+    .fillColor(COLORS.muted)
+    .text(
+      `Each provider's most recent 3 months (${movers.windowLabel}) are compared with their own prior ` +
+        `12-month baseline (${movers.baselineLabel}), adjusted for practice-wide seasonality, using an ` +
+        `overdispersed count model that accounts for each provider's normal volatility. SIGNIFICANT movers ` +
+        `survive a 10% false-discovery-rate correction across all ${movers.testedCount} providers tested; ` +
+        `LIKELY movers reach p < 0.05 individually. All other movement is within normal month-to-month variation.`
+    );
+  doc.moveDown(0.5);
+
+  const groups = [
+    { label: 'Significantly UP', items: movers.up, color: COLORS.strength },
+    { label: 'Significantly DOWN', items: movers.down, color: COLORS.threat },
+  ];
+
+  for (const g of groups) {
+    if (doc.y > doc.page.height - doc.page.margins.bottom - 60) doc.addPage();
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .fillColor(g.color)
+      .text(`${g.label} (${g.items.length})`);
+    if (!g.items.length) {
+      doc
+        .font('Helvetica-Oblique')
+        .fontSize(9)
+        .fillColor(COLORS.muted)
+        .text('None this month.');
+      doc.moveDown(0.4);
+      continue;
+    }
+    for (const m of g.items) {
+      if (doc.y > doc.page.height - doc.page.margins.bottom - 40) doc.addPage();
+      const tier = m.tier === 'significant' ? 'SIGNIFICANT' : 'LIKELY';
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .fillColor(COLORS.text)
+        .text(`${displayName(m.provider)}  [${tier}]`);
+      doc
+        .font('Helvetica')
+        .fontSize(8.5)
+        .fillColor(COLORS.muted)
+        .text(
+          `${m.observed} eyes observed vs ${avg(m.expected)} expected (${m.pctChange > 0 ? '+' : ''}${m.pctChange}%) ` +
+            `over ${movers.windowLabel}. Chance this is random variation: ${m.chanceLabel}`
+        );
+      doc.moveDown(0.15);
+    }
+    doc.moveDown(0.4);
+  }
+
+  doc.moveDown(0.4);
 }
 
 function renderLegend(doc) {
@@ -373,7 +444,7 @@ function renderSWOT(doc, analysis) {
         .font('Helvetica-Bold')
         .fillColor(COLORS.text)
         .fontSize(10)
-        .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}`, x + 8);
+        .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}${sigTag(p)}`, x + 8);
       doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.muted);
       for (const line of providerLines(p)) {
         doc.text(line, x + 8);
@@ -426,7 +497,7 @@ function renderActionReport(doc, analysis) {
           .font('Helvetica-Bold')
           .fillColor(COLORS.text)
           .fontSize(10)
-          .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}`);
+          .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}${sigTag(p)}`);
         doc.font('Helvetica').fontSize(9).fillColor(COLORS.muted);
         for (const line of providerLines(p)) {
           doc.text(line);

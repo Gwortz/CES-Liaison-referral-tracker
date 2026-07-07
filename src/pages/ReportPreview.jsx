@@ -117,6 +117,12 @@ export default function ReportPreview() {
         </div>
       )}
 
+      {analysis.significantMovers && (
+        <Section title="Statistically Significant Movers">
+          <SignificantMovers movers={analysis.significantMovers} />
+        </Section>
+      )}
+
       <Section title="Legend — How to read each provider entry">
         <Legend />
       </Section>
@@ -200,6 +206,83 @@ export default function ReportPreview() {
           items={analysis.action.zeroList || []}
         />
       </Section>
+    </div>
+  );
+}
+
+function SigBadge({ sig }) {
+  if (!sig) return null;
+  const up = sig.direction === 'up';
+  const confirmed = sig.tier === 'significant';
+  const cls = up
+    ? confirmed
+      ? 'bg-emerald-600 text-white'
+      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+    : confirmed
+    ? 'bg-red-600 text-white'
+    : 'bg-red-100 text-red-800 border border-red-300';
+  return (
+    <span
+      className={`ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ${cls}`}
+      title={`${sig.observed} eyes observed vs ${sig.expected} expected (${
+        sig.pctChange > 0 ? '+' : ''
+      }${sig.pctChange}%). Chance this is random variation: ${sig.chanceLabel}`}
+    >
+      {confirmed ? 'SIGNIFICANT' : 'LIKELY'} {up ? 'UP' : 'DOWN'}
+    </span>
+  );
+}
+
+function SignificantMovers({ movers }) {
+  const Item = ({ m }) => (
+    <div className="bg-white rounded-md border border-slate-200 p-2">
+      <div className="font-medium text-slate-800">
+        {displayName(m.provider)}
+        <SigBadge sig={m} />
+      </div>
+      <div className="text-xs text-slate-700 mt-0.5">
+        <b>{m.observed}</b> eyes observed vs <b>{m.expected}</b> expected (
+        {m.pctChange > 0 ? '+' : ''}
+        {m.pctChange}%) over {movers.windowLabel}.{' '}
+        <span className="text-slate-500">
+          Chance this is random variation: {m.chanceLabel}
+        </span>
+      </div>
+    </div>
+  );
+
+  const List = ({ title, items, color }) => (
+    <div className={`rounded-lg border ${COLOR_CLASSES[color].border} overflow-hidden`}>
+      <div
+        className={`${COLOR_CLASSES[color].header} text-white font-semibold px-3 py-1.5 text-sm`}
+      >
+        {title} ({items.length})
+      </div>
+      <div className={`${COLOR_CLASSES[color].tint} p-3 space-y-2`}>
+        {!items.length && (
+          <p className="text-slate-500 text-sm">None this month.</p>
+        )}
+        {items.map((m) => (
+          <Item key={m.provider} m={m} />
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs italic text-slate-600 leading-snug">
+        Each provider's most recent 3 months ({movers.windowLabel}) are compared
+        with their own prior 12-month baseline ({movers.baselineLabel}), adjusted
+        for practice-wide seasonality, using an overdispersed count model that
+        accounts for each provider's normal volatility. SIGNIFICANT movers
+        survive a 10% false-discovery-rate correction across all{' '}
+        {movers.testedCount} providers tested; LIKELY movers reach p &lt; 0.05
+        individually. All other movement is within normal month-to-month
+        variation.
+      </p>
+      <List title="Significantly UP" items={movers.up} color="emerald" />
+      <List title="Significantly DOWN" items={movers.down} color="red" />
     </div>
   );
 }
@@ -461,6 +544,7 @@ function Category({ label, description, color, items }) {
               <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
                 {p.tier} tier
               </span>
+              <SigBadge sig={p.significance} />
             </div>
             <ProviderMetaLine p={p} />
           </div>
@@ -499,6 +583,7 @@ function ActionList({ title, color, items }) {
               <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
                 {p.tier} tier
               </span>
+              <SigBadge sig={p.significance} />
             </div>
             <ProviderMetaLine p={p} />
             <div className="text-sm text-slate-700 italic mt-1">{p.reason}</div>

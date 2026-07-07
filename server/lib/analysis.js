@@ -14,6 +14,8 @@
  *  - Dual trend model (3-month and 12-month), ±2 thresholds.
  */
 
+import { computeSignificance } from './significance.js';
+
 const QUALIFYING_TRAILING_SUM = 20;
 
 const MONTH_SHORT = [
@@ -287,6 +289,11 @@ export function analyze(entries) {
 
   const series = buildProviderSeries(entries);
 
+  // Statistical significance vs each provider's own seasonally-adjusted
+  // baseline (see significance.js). Computed over ALL providers with an
+  // adequate baseline, independent of the qualifying rule below.
+  const sig = computeSignificance(entries, rmKey);
+
   // Identify qualifying providers (trailing-12 sum >= 20).
   const qualifying = new Map();
   for (const [provider, arr] of series) {
@@ -324,7 +331,10 @@ export function analyze(entries) {
     const trailing12BeforeThis = trailingSum(byMonth, rmKey - 1, 12);
     const isZeroReferrals = currentMonthEyes === 0 && trailing12BeforeThis >= 1;
 
+    const sigInfo = sig.results.get(provider);
+
     qualifying.set(provider, {
+      sig: sigInfo && sigInfo.tier ? sigInfo : null,
       provider,
       totalEyes,
       monthsPresent,
@@ -474,6 +484,15 @@ export function analyze(entries) {
     return bv - av;
   });
 
+  // Statistically significant providers float to the top of every bucket:
+  // FDR-confirmed first, then p<0.05 "likely", then the rest. The stable
+  // sort preserves each bucket's own ordering within those bands.
+  const sigRank = (p) =>
+    p.sig?.tier === 'significant' ? 0 : p.sig?.tier === 'likely' ? 1 : 2;
+  for (const bucket of [zeroReferrals, strengths, threats, weaknesses, opportunities]) {
+    bucket.sort((a, b) => sigRank(a) - sigRank(b));
+  }
+
   // ---- Executive summary aggregates ----
   const thisMonthTotal = monthTotal(entries, ry, rm);
   const prev = prevMonth(ry, rm);
@@ -612,7 +631,33 @@ export function analyze(entries) {
     zeroList: zeroReferrals.map((p) => decorate(p, 'zero')),
   };
 
+  // Top-of-report list of statistically significant movers, across ALL
+  // tested providers (not just qualifying ones). FDR-confirmed first, then
+  // "likely", each by ascending p-value.
+  const tierOrder = (t) => (t === 'significant' ? 0 : 1);
+  const movers = [...sig.results.values()]
+    .filter((r) => r.tier)
+    .sort((a, b) => tierOrder(a.tier) - tierOrder(b.tier) || a.p - b.p);
+  const moverView = (r) => ({
+    provider: r.provider,
+    tier: r.tier,
+    direction: r.direction,
+    observed: Math.round(r.observed),
+    expected: round1(r.expected),
+    pctChange: Math.round(r.pctChange),
+    pValue: r.p,
+    chanceLabel: r.p < 0.001 ? '<0.1%' : `${(r.p * 100).toFixed(1)}%`,
+  });
+  const significantMovers = {
+    windowLabel: periodLabel(rmKey - 2, rmKey),
+    baselineLabel: periodLabel(rmKey - 14, rmKey - 3),
+    testedCount: sig.testedCount,
+    up: movers.filter((r) => r.direction === 'up').map(moverView),
+    down: movers.filter((r) => r.direction === 'down').map(moverView),
+  };
+
   return {
+    significantMovers,
     empty: false,
     reportMonth: { year: ry, month: rm },
     summary: {
@@ -718,6 +763,20 @@ function enrich(p, labels) {
 
   return {
     provider: p.provider,
+    // Statistical significance vs own seasonally-adjusted baseline
+    // (null when tested-but-normal or not testable)
+    significance: p.sig
+      ? {
+          tier: p.sig.tier,
+          direction: p.sig.direction,
+          observed: Math.round(p.sig.observed),
+          expected: round1(p.sig.expected),
+          pctChange: Math.round(p.sig.pctChange),
+          pValue: p.sig.p,
+          chanceLabel:
+            p.sig.p < 0.001 ? '<0.1%' : `${(p.sig.p * 100).toFixed(1)}%`,
+        }
+      : null,
     // Current rolling monthly averages (eyes/month)
     last3Avg: round1(p.last3Avg),
     twelveMoAvg: round1(p.twelveMoAvg),
