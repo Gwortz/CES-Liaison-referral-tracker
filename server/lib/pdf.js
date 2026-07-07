@@ -5,19 +5,6 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const SWOT_CRITERIA = {
-  strengths:
-    'Top-15 providers by total historical eye volume whose 3-mo monthly avg is at least 5 eyes/mo, with neither the 3-mo nor 12-mo trend declining, and not materially below the same 3-month period last year.',
-  threats:
-    "Material decline: 3-mo monthly avg has dropped vs the prior-year same 3-month period (or vs the 12-mo baseline when no prior-year data) by at least the provider's volume-tier threshold.",
-  weaknesses:
-    "Softening: 3-mo monthly avg is below the 12-mo monthly avg by at least the provider's tier threshold, or either the 3-mo or 12-mo trend is declining. A seasonal-low override prevents flagging when last year's same 3 months were already a seasonal trough.",
-  opportunities:
-    'Strictly positive movement: either a newly qualifying provider (did not qualify 6 months ago but does now) with a non-declining 3-mo trend, or an improving provider with a positive change vs prior year and no declining trends.',
-  zeroReferrals:
-    'Zero eyes this month, but at least one referral in the trailing 12 months. Recent activity makes the silence notable. Always classified here regardless of other criteria.',
-};
-
 const COLORS = {
   brand: '#0B4D6B',
   accent: '#1E88C4',
@@ -76,8 +63,7 @@ export function generateReport({ market, analysis }) {
       renderLegend(doc);
       renderExecutiveSummary(doc, analysis);
       renderTrailingForecast(doc, analysis);
-      renderSWOT(doc, analysis);
-      renderActionReport(doc, analysis);
+      renderRelationshipLists(doc, analysis);
       renderFooter(doc);
 
       doc.end();
@@ -126,8 +112,18 @@ function renderExecutiveSummary(doc, analysis) {
     ['Year-over-year change', pct(s.yoyPct)],
     ['Active referring providers this month', fmt(s.activeProvidersThisMonth)],
     ['Qualifying providers in analysis', fmt(s.qualifyingCount)],
-    ['Providers with zero referrals this month', fmt(s.zeroReferralCount ?? 0)],
-    ['Providers on Call List (material decline)', fmt(s.callListCount ?? 0)],
+    [
+      'Statistically significant UP',
+      s.sigUpCount != null
+        ? `${s.sigUpCount} (+${s.likelyUpCount ?? 0} likely)`
+        : '--',
+    ],
+    [
+      'Statistically significant DOWN',
+      s.sigDownCount != null
+        ? `${s.sigDownCount} (+${s.likelyDownCount ?? 0} likely)`
+        : '--',
+    ],
   ];
 
   doc.font('Helvetica').fontSize(10).fillColor(COLORS.text);
@@ -151,39 +147,7 @@ function renderExecutiveSummary(doc, analysis) {
       .text(s.contradictingTrendsNote, { align: 'left' });
   }
 
-  // Top 3 per category
-  renderTopThreePerCategory(doc, analysis);
-
   doc.moveDown(1);
-}
-
-function renderTopThreePerCategory(doc, analysis) {
-  const swot = analysis.swot || {};
-  const top3 = (list) =>
-    (list || [])
-      .slice(0, 3)
-      .map((p) => displayName(p.provider))
-      .join(', ') || 'none';
-
-  const rows = [
-    ['Top 3 Strengths', top3(swot.strengths), COLORS.strength],
-    ['Top 3 Threats', top3(swot.threats), COLORS.threat],
-    ['Top 3 Weaknesses', top3(swot.weaknesses), COLORS.weakness],
-    ['Top 3 Opportunities', top3(swot.opportunities), COLORS.opportunity],
-    ['Top 3 Zero Referrals', top3(swot.zeroReferrals), COLORS.zero],
-  ];
-
-  doc.moveDown(0.4);
-  rows.forEach(([label, names, color]) => {
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(10)
-      .fillColor(color)
-      .text(`${label}: `, { continued: true })
-      .font('Helvetica')
-      .fillColor(COLORS.text)
-      .text(names);
-  });
 }
 
 function sigTag(p) {
@@ -212,8 +176,16 @@ function renderSignificantMovers(doc, analysis) {
   doc.moveDown(0.5);
 
   const groups = [
-    { label: 'Significantly UP', items: movers.up, color: COLORS.strength },
-    { label: 'Significantly DOWN', items: movers.down, color: COLORS.threat },
+    {
+      label: 'Significantly UP -- reinforce and thank',
+      items: movers.up,
+      color: COLORS.strength,
+    },
+    {
+      label: 'Significantly DOWN -- call list, personal visit or call this week',
+      items: movers.down,
+      color: COLORS.threat,
+    },
   ];
 
   for (const g of groups) {
@@ -348,139 +320,49 @@ function signedDec(n) {
   return `${s}${n.toFixed(1)}`;
 }
 
-function renderSWOT(doc, analysis) {
-  sectionTitle(doc, 'SWOT Analysis');
-
-  const swot = analysis.swot;
-  const MAX = 15;
-  // Strengths/Threats/Weaknesses/Opportunities first (capped at top 15 by the
-  // strongest trend within each category), Zero Referrals last.
-  const sections = [
-    {
-      label: 'Strengths (Top volume, stable or growing)',
-      description: SWOT_CRITERIA.strengths,
-      color: COLORS.strength,
-      items: (swot.strengths || []).slice(0, MAX),
-      total: (swot.strengths || []).length,
-    },
-    {
-      label: 'Threats (Material decline)',
-      description: SWOT_CRITERIA.threats,
-      color: COLORS.threat,
-      items: (swot.threats || []).slice(0, MAX),
-      total: (swot.threats || []).length,
-    },
-    {
-      label: 'Weaknesses (Softening)',
-      description: SWOT_CRITERIA.weaknesses,
-      color: COLORS.weakness,
-      items: (swot.weaknesses || []).slice(0, MAX),
-      total: (swot.weaknesses || []).length,
-    },
-    {
-      label: 'Opportunities (Emerging)',
-      description: SWOT_CRITERIA.opportunities,
-      color: COLORS.opportunity,
-      items: (swot.opportunities || []).slice(0, MAX),
-      total: (swot.opportunities || []).length,
-    },
-    {
-      label: 'Zero Referrals This Month',
-      description: SWOT_CRITERIA.zeroReferrals,
-      color: COLORS.zero,
-      items: (swot.zeroReferrals || []).slice(0, MAX),
-      total: (swot.zeroReferrals || []).length,
-    },
-  ];
-
-  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-  sections.forEach((q) => {
-    if (doc.y > doc.page.height - doc.page.margins.bottom - 80) doc.addPage();
-    const x = doc.page.margins.left;
-    const y = doc.y;
-
-    doc.save();
-    doc.rect(x, y, pageWidth, 16).fill(q.color);
-    const total = q.total ?? q.items.length;
-    const shown = q.items.length;
-    const countLabel = total > shown ? `(top ${shown} of ${total})` : `(${total})`;
-    doc
-      .fillColor('#fff')
-      .font('Helvetica-Bold')
-      .fontSize(11)
-      .text(`${q.label} ${countLabel}`, x + 8, y + 3, {
-        width: pageWidth - 16,
-      });
-    doc.restore();
-
-    doc.y = y + 20;
-
-    if (q.description) {
-      doc
-        .font('Helvetica-Oblique')
-        .fontSize(8.5)
-        .fillColor(COLORS.muted)
-        .text(q.description, x + 8, doc.y, {
-          width: pageWidth - 16,
-          align: 'left',
-        });
-      doc.moveDown(0.3);
-    }
-
-    if (!q.items.length) {
-      doc
-        .fillColor(COLORS.muted)
-        .font('Helvetica-Oblique')
-        .fontSize(9)
-        .text('None this month.', x + 8);
-      doc.moveDown(0.5);
-      return;
-    }
-
-    q.items.forEach((p) => {
-      if (doc.y > doc.page.height - doc.page.margins.bottom - 40) doc.addPage();
-      doc
-        .font('Helvetica-Bold')
-        .fillColor(COLORS.text)
-        .fontSize(10)
-        .text(`${displayName(p.provider)}  ${p.trendSymbolAscii || p.arrow}${sigTag(p)}`, x + 8);
-      doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.muted);
-      for (const line of providerLines(p)) {
-        doc.text(line, x + 8);
-      }
-      doc.moveDown(0.15);
-    });
-    doc.moveDown(0.4);
-  });
-}
-
-function renderActionReport(doc, analysis) {
+function renderRelationshipLists(doc, analysis) {
+  const lists = analysis.lists;
+  if (!lists) return;
   if (doc.y > doc.page.height - 200) doc.addPage();
-  sectionTitle(doc, 'Monthly Action Report');
+  sectionTitle(doc, 'Relationship Lists');
 
-  const MAX = 15;
-  const cap = (arr) => (arr || []).slice(0, MAX);
-  const rawLists = [
-    { title: 'Call List (Threats -- personal visit or call this week)', color: COLORS.threat, items: cap(analysis.action.callList), total: (analysis.action.callList || []).length },
-    { title: 'Watch List (Weaknesses -- monitor next month)', color: COLORS.weakness, items: cap(analysis.action.watchList), total: (analysis.action.watchList || []).length },
-    { title: 'Welcome List (Opportunities -- reach out and encourage)', color: COLORS.opportunity, items: cap(analysis.action.welcomeList), total: (analysis.action.welcomeList || []).length },
-    { title: 'Thank List (Strengths -- keep the relationship warm)', color: COLORS.strength, items: cap(analysis.action.thankList), total: (analysis.action.thankList || []).length },
-    { title: 'Zero Referrals List (reach out personally)', color: COLORS.zero, items: cap(analysis.action.zeroList), total: (analysis.action.zeroList || []).length },
+  doc
+    .font('Helvetica-Oblique')
+    .fontSize(8.5)
+    .fillColor(COLORS.muted)
+    .text(
+      'These lists cover what the statistical test cannot: your biggest relationships (Thank), ' +
+        'providers too new to test (Welcome), and providers whose silence has not yet reached ' +
+        'statistical significance (Silent).'
+    );
+  doc.moveDown(0.5);
+
+  const groups = [
+    {
+      title: 'Thank List (top volume -- keep the relationship warm)',
+      color: COLORS.strength,
+      items: lists.thankList || [],
+    },
+    {
+      title: 'Welcome List (newly qualifying -- reach out and encourage)',
+      color: COLORS.opportunity,
+      items: lists.welcomeList || [],
+    },
+    {
+      title: 'Silent List (zero this month, not statistically flagged)',
+      color: COLORS.zero,
+      items: lists.silentList || [],
+    },
   ];
 
-  rawLists.forEach((list) => {
+  groups.forEach((list) => {
     if (doc.y > doc.page.height - doc.page.margins.bottom - 80) doc.addPage();
 
-    const countSuffix =
-      list.total > list.items.length
-        ? ` (top ${list.items.length} of ${list.total})`
-        : ` (${list.total})`;
     doc
       .font('Helvetica-Bold')
       .fillColor(list.color)
       .fontSize(11)
-      .text(`${list.title}${countSuffix}`);
+      .text(`${list.title} (${list.items.length})`);
 
     doc.moveDown(0.2);
 

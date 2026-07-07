@@ -7,19 +7,6 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const SWOT_CRITERIA = {
-  strengths:
-    'Top-15 providers by total historical eye volume whose 3-mo monthly avg is at least 5 eyes/mo, with neither the 3-mo nor 12-mo trend declining, and not materially below the same 3-month period last year.',
-  threats:
-    "Material decline: 3-mo monthly avg has dropped vs the prior-year same 3-month period (or vs the 12-mo baseline when no prior-year data) by at least the provider's volume-tier threshold.",
-  weaknesses:
-    "Softening: 3-mo monthly avg is below the 12-mo monthly avg by at least the provider's tier threshold, or either the 3-mo or 12-mo trend is declining. A seasonal-low override prevents flagging when last year's same 3 months were already a seasonal trough.",
-  opportunities:
-    'Strictly positive movement: either a newly qualifying provider (did not qualify 6 months ago but does now) with a non-declining 3-mo trend, or an improving provider with a positive change vs prior year and no declining trends.',
-  zeroReferrals:
-    'Zero eyes this month, but at least one referral in the trailing 12 months. Recent activity makes the silence notable. Always classified here regardless of other criteria.',
-};
-
 function pct(n) {
   if (n == null) return '—';
   const s = n > 0 ? '+' : '';
@@ -137,75 +124,37 @@ export default function ReportPreview() {
             {analysis.summary.contradictingTrendsNote}
           </div>
         )}
-        <TopThreePerCategory swot={analysis.swot} />
       </Section>
 
       <Section title="Trailing & Forecast">
         <TrailingForecast summary={analysis.summary} />
       </Section>
 
-      <Section title="SWOT Analysis (top 15 per category)">
-        <div className="space-y-4">
-          <Category
-            label="Strengths (Top volume, stable or growing)"
-            description={SWOT_CRITERIA.strengths}
+      {analysis.lists && (
+        <Section title="Relationship Lists">
+          <p className="text-xs italic text-slate-600 leading-snug mb-4">
+            These lists cover what the statistical test cannot: your biggest
+            relationships (Thank), providers too new to test (Welcome), and
+            providers whose silence has not yet reached statistical
+            significance (Silent).
+          </p>
+          <ActionList
+            title="Thank List — top volume, keep the relationship warm"
             color="emerald"
-            items={analysis.swot.strengths || []}
+            items={analysis.lists.thankList}
           />
-          <Category
-            label="Threats (Material Decline)"
-            description={SWOT_CRITERIA.threats}
-            color="red"
-            items={analysis.swot.threats || []}
-          />
-          <Category
-            label="Weaknesses (Softening)"
-            description={SWOT_CRITERIA.weaknesses}
-            color="amber"
-            items={analysis.swot.weaknesses || []}
-          />
-          <Category
-            label="Opportunities (Emerging)"
-            description={SWOT_CRITERIA.opportunities}
+          <ActionList
+            title="Welcome List — newly qualifying providers, reach out and encourage"
             color="sky"
-            items={analysis.swot.opportunities || []}
+            items={analysis.lists.welcomeList}
           />
-          <Category
-            label="Zero Referrals This Month"
-            description={SWOT_CRITERIA.zeroReferrals}
+          <ActionList
+            title="Silent List — zero this month, not statistically flagged"
             color="slate"
-            items={analysis.swot.zeroReferrals || []}
+            items={analysis.lists.silentList}
           />
-        </div>
-      </Section>
-
-      <Section title="Monthly Action Report (top 15 per list)">
-        <ActionList
-          title="Call List — Threats (personal visit or call this week)"
-          color="red"
-          items={analysis.action.callList}
-        />
-        <ActionList
-          title="Watch List — Weaknesses (monitor next month)"
-          color="amber"
-          items={analysis.action.watchList}
-        />
-        <ActionList
-          title="Welcome List — Opportunities (reach out and encourage)"
-          color="sky"
-          items={analysis.action.welcomeList}
-        />
-        <ActionList
-          title="Thank List — Strengths (keep the relationship warm)"
-          color="emerald"
-          items={analysis.action.thankList}
-        />
-        <ActionList
-          title="Zero Referrals List (reach out personally)"
-          color="slate"
-          items={analysis.action.zeroList || []}
-        />
-      </Section>
+        </Section>
+      )}
     </div>
   );
 }
@@ -233,8 +182,8 @@ function SigBadge({ sig }) {
   );
 }
 
-function SignificantMovers({ movers }) {
-  const Item = ({ m }) => (
+function MoverItem({ m, windowLabel }) {
+  return (
     <div className="bg-white rounded-md border border-slate-200 p-2">
       <div className="font-medium text-slate-800">
         {displayName(m.provider)}
@@ -243,15 +192,17 @@ function SignificantMovers({ movers }) {
       <div className="text-xs text-slate-700 mt-0.5">
         <b>{m.observed}</b> eyes observed vs <b>{m.expected}</b> expected (
         {m.pctChange > 0 ? '+' : ''}
-        {m.pctChange}%) over {movers.windowLabel}.{' '}
+        {m.pctChange}%) over {windowLabel}.{' '}
         <span className="text-slate-500">
           Chance this is random variation: {m.chanceLabel}
         </span>
       </div>
     </div>
   );
+}
 
-  const List = ({ title, items, color }) => (
+function MoverList({ title, items, color, windowLabel }) {
+  return (
     <div className={`rounded-lg border ${COLOR_CLASSES[color].border} overflow-hidden`}>
       <div
         className={`${COLOR_CLASSES[color].header} text-white font-semibold px-3 py-1.5 text-sm`}
@@ -263,12 +214,14 @@ function SignificantMovers({ movers }) {
           <p className="text-slate-500 text-sm">None this month.</p>
         )}
         {items.map((m) => (
-          <Item key={m.provider} m={m} />
+          <MoverItem key={m.provider} m={m} windowLabel={windowLabel} />
         ))}
       </div>
     </div>
   );
+}
 
+function SignificantMovers({ movers }) {
   return (
     <div className="space-y-4">
       <p className="text-xs italic text-slate-600 leading-snug">
@@ -281,8 +234,18 @@ function SignificantMovers({ movers }) {
         individually. All other movement is within normal month-to-month
         variation.
       </p>
-      <List title="Significantly UP" items={movers.up} color="emerald" />
-      <List title="Significantly DOWN" items={movers.down} color="red" />
+      <MoverList
+        title="Significantly UP — reinforce and thank"
+        items={movers.up}
+        color="emerald"
+        windowLabel={movers.windowLabel}
+      />
+      <MoverList
+        title="Significantly DOWN — call list, personal visit or call this week"
+        items={movers.down}
+        color="red"
+        windowLabel={movers.windowLabel}
+      />
     </div>
   );
 }
@@ -307,29 +270,6 @@ function Legend() {
         </div>
       ))}
     </dl>
-  );
-}
-
-function TopThreePerCategory({ swot }) {
-  const top3 = (list) =>
-    (list || []).slice(0, 3).map((p) => displayName(p.provider)).join(', ') ||
-    'none';
-  const rows = [
-    ['Top 3 Strengths', top3(swot.strengths), 'text-emerald-700'],
-    ['Top 3 Threats', top3(swot.threats), 'text-red-700'],
-    ['Top 3 Weaknesses', top3(swot.weaknesses), 'text-amber-700'],
-    ['Top 3 Opportunities', top3(swot.opportunities), 'text-sky-700'],
-    ['Top 3 Zero Referrals', top3(swot.zeroReferrals), 'text-slate-700'],
-  ];
-  return (
-    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1 text-sm">
-      {rows.map(([label, names, color]) => (
-        <div key={label}>
-          <span className={`font-semibold ${color}`}>{label}:</span>{' '}
-          <span className="text-slate-800">{names}</span>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -404,8 +344,20 @@ function SummaryGrid({ summary }) {
     { label: 'YoY change', value: pct(summary.yoyPct) },
     { label: 'Active providers', value: summary.activeProvidersThisMonth },
     { label: 'Qualifying providers', value: summary.qualifyingCount },
-    { label: 'Zero-referral providers', value: summary.zeroReferralCount ?? 0 },
-    { label: 'Call List count', value: summary.callListCount ?? 0 },
+    {
+      label: 'Significantly up',
+      value:
+        summary.sigUpCount != null
+          ? `${summary.sigUpCount} (+${summary.likelyUpCount ?? 0} likely)`
+          : '—',
+    },
+    {
+      label: 'Significantly down',
+      value:
+        summary.sigDownCount != null
+          ? `${summary.sigDownCount} (+${summary.likelyDownCount ?? 0} likely)`
+          : '—',
+    },
   ];
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -511,44 +463,6 @@ function ProviderMetaLine({ p }) {
           overall trend (3-mo/12-mo):{' '}
           <b className="font-mono">{p.trendSymbol || p.arrow}</b>
         </span>
-      </div>
-    </div>
-  );
-}
-
-function Category({ label, description, color, items }) {
-  const c = COLOR_CLASSES[color];
-  const MAX = 15;
-  const shown = (items || []).slice(0, MAX);
-  const countLabel =
-    (items || []).length > shown.length
-      ? `top ${shown.length} of ${items.length}`
-      : `${(items || []).length}`;
-  return (
-    <div className={`rounded-lg border ${c.border} overflow-hidden`}>
-      <div className={`${c.header} text-white font-semibold px-3 py-1.5 text-sm`}>
-        {label} ({countLabel})
-      </div>
-      <div className={`${c.tint} p-3 space-y-2`}>
-        {description && (
-          <p className="text-xs italic text-slate-600 leading-snug">
-            {description}
-          </p>
-        )}
-        {!shown.length && <p className="text-slate-500 text-sm">None this month.</p>}
-        {shown.map((p) => (
-          <div key={p.provider} className="bg-white rounded-md border border-slate-200 p-2">
-            <div className="font-medium text-slate-800">
-              {displayName(p.provider)}{' '}
-              <span className="text-slate-500 font-mono">{p.trendSymbol || p.arrow}</span>
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
-                {p.tier} tier
-              </span>
-              <SigBadge sig={p.significance} />
-            </div>
-            <ProviderMetaLine p={p} />
-          </div>
-        ))}
       </div>
     </div>
   );

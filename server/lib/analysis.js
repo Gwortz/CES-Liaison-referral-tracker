@@ -337,6 +337,7 @@ export function analyze(entries) {
       sig: sigInfo && sigInfo.tier ? sigInfo : null,
       provider,
       totalEyes,
+      trailing12: trailingSum(byMonth, rmKey, 12),
       monthsPresent,
       last3Avg,
       twelveMoAvg,
@@ -493,6 +494,49 @@ export function analyze(entries) {
     bucket.sort((a, b) => sigRank(a) - sigRank(b));
   }
 
+  // ---- Relationship lists (state-based, not trend heuristics) ----
+  // These carry the information the statistical test cannot: who is big
+  // (Thank), who is new and untestable (Welcome), and who went quiet below
+  // statistical significance (Silent).
+
+  // Thank -- top 15 by trailing-12-month volume, active in the current
+  // window, not statistically declining.
+  const thankListRaw = Array.from(qualifying.values())
+    .filter(
+      (p) =>
+        p.last3Avg > 0 &&
+        !p.isZeroReferrals &&
+        !(p.sig && p.sig.direction === 'down')
+    )
+    .sort((a, b) => b.trailing12 - a.trailing12)
+    .slice(0, 15);
+
+  // Welcome -- newly qualifying providers. Usually untestable (no stable
+  // baseline); the rare tested-and-declining one belongs on the DOWN call
+  // list, not here.
+  const welcomeListRaw = Array.from(qualifying.values())
+    .filter((p) => p.isNewProvider && !(p.sig && p.sig.direction === 'down'))
+    .sort((a, b) => b.last3Avg - a.last3Avg);
+
+  // Silent -- zero referrals this month but not statistically flagged;
+  // larger silent providers appear on the significant DOWN list instead.
+  const silentListRaw = zeroReferrals.filter(
+    (p) => !(p.sig && p.sig.direction === 'down')
+  );
+
+  // Mover counts for the executive summary
+  const moverCounts = { sigUp: 0, likelyUp: 0, sigDown: 0, likelyDown: 0 };
+  for (const r of sig.results.values()) {
+    if (!r.tier) continue;
+    if (r.direction === 'up') {
+      if (r.tier === 'significant') moverCounts.sigUp += 1;
+      else moverCounts.likelyUp += 1;
+    } else {
+      if (r.tier === 'significant') moverCounts.sigDown += 1;
+      else moverCounts.likelyDown += 1;
+    }
+  }
+
   // ---- Executive summary aggregates ----
   const thisMonthTotal = monthTotal(entries, ry, rm);
   const prev = prevMonth(ry, rm);
@@ -551,11 +595,9 @@ export function analyze(entries) {
     momPct,
     yoyPct,
     counts: {
-      strengths: strengths.length,
-      threats: threats.length,
-      weaknesses: weaknesses.length,
-      opportunities: opportunities.length,
-      zeroReferrals: zeroReferrals.length,
+      ...moverCounts,
+      welcome: welcomeListRaw.length,
+      silent: silentListRaw.length,
     },
   });
 
@@ -591,6 +633,12 @@ export function analyze(entries) {
     const twelve = p.twelveMoAvg.toFixed(1);
     const prior = p.priorAvg == null ? null : p.priorAvg.toFixed(1);
     switch (type) {
+      case 'thank':
+        return `Top referral volume: ${Math.round(p.trailing12)} eyes in the last 12 months, 3-mo monthly avg ${last3} eyes/mo -- thank and keep the relationship warm.`;
+      case 'welcome':
+        return `Newly qualifying provider (3-mo monthly avg ${last3} eyes/mo, 12-mo monthly avg ${twelve} eyes/mo). Too new for statistical testing -- welcome and encourage.`;
+      case 'silent':
+        return `No referrals this month; 12-mo monthly avg was ${twelve} eyes/mo (${tierName} tier). Not statistically significant yet -- a light personal touch is cheap insurance.`;
       case 'strength':
         return `Top-15 historical volume (${Math.round(p.totalEyes)} total eyes). 3-mo monthly avg ${last3} eyes/mo, 12-mo monthly avg ${twelve} eyes/mo, both trends stable or growing -- thank and keep engaged.`;
       case 'threat': {
@@ -631,6 +679,14 @@ export function analyze(entries) {
     zeroList: zeroReferrals.map((p) => decorate(p, 'zero')),
   };
 
+  // The report's primary lists: statistical movers plus the three
+  // state-based relationship lists the model cannot cover.
+  const lists = {
+    thankList: thankListRaw.map((p) => decorate(p, 'thank')),
+    welcomeList: welcomeListRaw.map((p) => decorate(p, 'welcome')),
+    silentList: silentListRaw.map((p) => decorate(p, 'silent')),
+  };
+
   // Top-of-report list of statistically significant movers, across ALL
   // tested providers (not just qualifying ones). FDR-confirmed first, then
   // "likely", each by ascending p-value.
@@ -658,6 +714,7 @@ export function analyze(entries) {
 
   return {
     significantMovers,
+    lists,
     empty: false,
     reportMonth: { year: ry, month: rm },
     summary: {
@@ -671,6 +728,12 @@ export function analyze(entries) {
       qualifyingCount: qualifying.size,
       zeroReferralCount: zeroReferrals.length,
       callListCount: threats.length,
+      sigUpCount: moverCounts.sigUp,
+      likelyUpCount: moverCounts.likelyUp,
+      sigDownCount: moverCounts.sigDown,
+      likelyDownCount: moverCounts.likelyDown,
+      welcomeCount: welcomeListRaw.length,
+      silentCount: silentListRaw.length,
       overallTrend,
       overallAssessment,
       contradictingTrendsNote,
@@ -732,14 +795,22 @@ function buildOverallAssessment({ momPct, yoyPct, counts }) {
       ? `down ${Math.abs(yoyPct).toFixed(1)}% vs the same month last year`
       : 'roughly flat vs the same month last year';
 
+  const upTotal = counts.sigUp + counts.likelyUp;
+  const downTotal = counts.sigDown + counts.likelyDown;
   const tone =
-    counts.threats + counts.zeroReferrals > counts.strengths + counts.opportunities
-      ? 'attention is needed on the call and zero-referral lists first'
-      : counts.strengths + counts.opportunities > counts.threats + counts.zeroReferrals
-      ? 'momentum is positive -- prioritize thank-you touches and nurture opportunities'
-      : 'the month is mixed -- balance retention visits with outreach to softening providers';
+    downTotal > upTotal
+      ? 'prioritize calls to the statistically DOWN providers first'
+      : upTotal > downTotal
+      ? 'momentum is positive -- reinforce the statistically UP providers and welcome new referrers'
+      : 'the month is mixed -- balance calls to DOWN providers with thank-you touches';
 
-  return `Overall referrals are ${momText} and ${yoyText}. ${counts.strengths} top-volume provider(s) are stable or growing, ${counts.threats} show material decline, ${counts.weaknesses} are softening, ${counts.opportunities} are emerging opportunities, and ${counts.zeroReferrals} sent zero this month. Recommendation: ${tone}.`;
+  return (
+    `Overall referrals are ${momText} and ${yoyText}. ` +
+    `Statistically significant movement: ${counts.sigUp} provider(s) confirmed UP and ${counts.sigDown} confirmed DOWN` +
+    ` (plus ${counts.likelyUp} likely up, ${counts.likelyDown} likely down). ` +
+    `${counts.welcome} newly qualifying provider(s), ${counts.silent} quiet this month without statistical significance. ` +
+    `All other movement is within normal variation. Recommendation: ${tone}.`
+  );
 }
 
 function enrich(p, labels) {
