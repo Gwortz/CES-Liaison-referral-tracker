@@ -54,8 +54,9 @@ function priorYearPeriodLabel(rmKey) {
 }
 
 function prev3PeriodLabel(rmKey) {
-  // Preceding 3-month window: [rmKey-5, rmKey-4, rmKey-3]
-  return periodLabel(rmKey - 5, rmKey - 3);
+  // Rolling 3-month window ending one month before the report month:
+  // [rmKey-3, rmKey-2, rmKey-1] (e.g. Mar-May for a June report)
+  return periodLabel(rmKey - 3, rmKey - 1);
 }
 
 function prev12PeriodLabel(rmKey) {
@@ -297,8 +298,10 @@ export function analyze(entries) {
 
     const { avg: last3Avg, valuesForTrend } = threeMonthWindow(byMonth, rmKey);
     const twelveMoAvg = twelveMonthAverage(byMonth, rmKey);
-    // Immediately-preceding rolling windows, for trend context
-    const { avg: prev3Avg } = threeMonthWindowAt(byMonth, rmKey - 3);
+    // Immediately-preceding rolling windows, for trend context.
+    // The 3-mo comparison is the rolling window ending one month earlier
+    // (overlaps the current window by two months).
+    const { avg: prev3Avg } = threeMonthWindowAt(byMonth, rmKey - 1);
     const prev12Avg = twelveMonthAverageAt(byMonth, rmKey - 12);
     const priorAvg = priorYearSame3Avg(byMonth, rmKey);
     const absoluteChange = priorAvg == null

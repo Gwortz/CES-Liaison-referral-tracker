@@ -207,7 +207,7 @@ export default function ReportPreview() {
 function Legend() {
   const items = [
     ['3-mo monthly avg', 'Average referrals per month over the most recent 3 months (ending in the report month).'],
-    ['prev 3-mo', 'The 3 months immediately before that window, for short-term trend comparison. Shows the delta and direction (UP/STABLE/DOWN).'],
+    ['prev 3-mo', 'The rolling 3-month window ending one month earlier (e.g. Mar-May for a June report), showing how the rolling average moved since last month. Shows the delta and direction (UP/STABLE/DOWN).'],
     ['12-mo monthly avg', 'Average referrals per month over the most recent 12 months, excluding any months the provider sent zero referrals.'],
     ['prev 12-mo', 'The 12 months immediately before that window, for longer-term trend comparison.'],
     ['prior-year 3-mo monthly avg', 'Average referrals per month for the same 3 months one year earlier, for year-over-year context.'],
